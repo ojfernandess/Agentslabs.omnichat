@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
   Search, Plus, Send, Paperclip, MoreVertical, User, Clock,
-  CheckCircle2, AlertCircle, MessageSquare, Filter, Hash
+  CheckCircle2, AlertCircle, MessageSquare, Filter, Hash, Inbox
 } from 'lucide-react';
 
 const channelColors: Record<string, string> = {
