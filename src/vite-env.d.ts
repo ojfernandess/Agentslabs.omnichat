@@ -3,6 +3,7 @@
 interface ImportMetaEnv {
   readonly VITE_PUBLIC_APP_URL?: string;
   readonly VITE_SUPABASE_URL?: string;
+  readonly VITE_SUPABASE_PUBLISHABLE_KEY?: string;
   readonly VITE_META_APP_ID?: string;
   readonly VITE_META_OAUTH_REDIRECT_URI?: string;
   /** Facebook Login for Business → Configurations (WhatsApp Embedded Signup) */

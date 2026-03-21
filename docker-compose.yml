@@ -1,0 +1,25 @@
+# Frontend + Nginx. O Postgres/Auth/Storage continuam no Supabase (cloud ou self-hosted).
+# Migrações: use GitHub Actions (supabase db push) ou `supabase db push` localmente.
+#
+# Uso:
+#   cp .env.example .env   # preencher VITE_*
+#   docker compose up -d --build
+#
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:?defina no .env}
+        VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:?defina no .env}
+        VITE_META_APP_ID: ${VITE_META_APP_ID:-}
+        VITE_PUBLIC_APP_URL: ${VITE_PUBLIC_APP_URL:-}
+        VITE_META_OAUTH_REDIRECT_URI: ${VITE_META_OAUTH_REDIRECT_URI:-}
+        VITE_META_EMBEDDED_SIGNUP_CONFIG_ID: ${VITE_META_EMBEDDED_SIGNUP_CONFIG_ID:-}
+        VITE_META_GRAPH_VERSION: ${VITE_META_GRAPH_VERSION:-}
+        VITE_META_EMBEDDED_TOKEN_REDIRECT_URI: ${VITE_META_EMBEDDED_TOKEN_REDIRECT_URI:-}
+        VITE_INTERNAL_HOOK_SECRET: ${VITE_INTERNAL_HOOK_SECRET:-}
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    restart: unless-stopped
