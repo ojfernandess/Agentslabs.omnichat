@@ -1,1 +1,34 @@
+# ID do projeto no painel Supabase (ajuste se necessário)
 project_id = "bpbkregiishwxnnchroy"
+
+[api]
+enabled = true
+
+# Webhooks externos da Meta/Telegram — sem JWT do Supabase Auth
+# Cada função inclui pasta _shared/ (cópia) — o deploy não inclui ../_shared
+[functions.meta-whatsapp-webhook]
+verify_jwt = false
+
+[functions.telegram-webhook]
+verify_jwt = false
+
+[functions.telegram-set-webhook]
+verify_jwt = false
+
+[functions.send-whatsapp]
+verify_jwt = false
+
+[functions.webhook-dispatcher]
+verify_jwt = false
+
+[functions.meta-oauth-exchange]
+verify_jwt = true
+
+[functions.test-webhook]
+verify_jwt = true
+
+[functions.process-media]
+verify_jwt = true
+
+[functions.send-csat-survey]
+verify_jwt = true

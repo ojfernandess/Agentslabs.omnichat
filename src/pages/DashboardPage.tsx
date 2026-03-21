@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLocation } from 'react-router-dom';
 import { useOrg } from '@/contexts/OrgContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
@@ -30,6 +31,8 @@ const StatCard: React.FC<{
 );
 
 const DashboardPage: React.FC = () => {
+  const location = useLocation();
+  const isInbox = location.pathname === '/inbox';
   const { currentOrg } = useOrg();
 
   const { data: stats } = useQuery({
@@ -58,8 +61,12 @@ const DashboardPage: React.FC = () => {
     <div className="h-full overflow-y-auto">
       <div className="p-6 lg:p-8 space-y-8 max-w-6xl">
         <div className="space-y-1 animate-fade-in">
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-          <p className="text-muted-foreground">Visão geral do atendimento de {currentOrg?.name}</p>
+          <h1 className="text-2xl font-bold">{isInbox ? 'Caixa de entrada' : 'Dashboard'}</h1>
+          <p className="text-muted-foreground">
+            {isInbox
+              ? `Resumo da caixa e métricas de ${currentOrg?.name}`
+              : `Visão geral do atendimento de ${currentOrg?.name}`}
+          </p>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 animate-fade-in" style={{ animationDelay: '0.1s' }}>

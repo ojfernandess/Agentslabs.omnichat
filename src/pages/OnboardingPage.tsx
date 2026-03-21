@@ -3,7 +3,8 @@ import { useOrg } from '@/contexts/OrgContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Building2, ArrowRight } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
+import { APP_LOGO_SRC, APP_NAME } from '@/constants/branding';
 
 const OnboardingPage: React.FC = () => {
   const { createOrganization } = useOrg();
@@ -31,16 +32,15 @@ const OnboardingPage: React.FC = () => {
   return (
     <div className="flex min-h-screen items-center justify-center p-8 bg-background">
       <div className="w-full max-w-md space-y-8 animate-fade-in">
-        <div className="flex items-center gap-3 justify-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary">
-            <Building2 className="h-6 w-6 text-primary-foreground" />
-          </div>
+        <div className="flex flex-col items-center gap-3 justify-center">
+          <img src={APP_LOGO_SRC} alt={APP_NAME} className="h-14 w-auto max-w-[220px] object-contain" />
+          <p className="text-sm font-medium text-muted-foreground">{APP_NAME}</p>
         </div>
 
         <div className="space-y-2 text-center">
           <h1 className="text-2xl font-bold">Criar sua empresa</h1>
           <p className="text-muted-foreground">
-            Configure sua organização para começar a usar o OmniChat
+            Configure a sua organização para começar a utilizar a plataforma {APP_NAME}
           </p>
         </div>
 

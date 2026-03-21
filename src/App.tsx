@@ -15,7 +15,23 @@ import TeamPage from "@/pages/TeamPage";
 import ChannelsPage from "@/pages/ChannelsPage";
 import LabelsPage from "@/pages/LabelsPage";
 import SettingsPage from "@/pages/SettingsPage";
+import AnalyticsPage from "@/pages/AnalyticsPage";
+import WebhooksPage from "@/pages/WebhooksPage";
 import NotFound from "@/pages/NotFound";
+import MetaOAuthCallbackPage from "@/pages/MetaOAuthCallbackPage";
+import CannedResponsesPage from "@/pages/CannedResponsesPage";
+import CaptainPage from "@/pages/CaptainPage";
+import CampaignsPage from "@/pages/CampaignsPage";
+import HelpCenterAdminPage from "@/pages/HelpCenterAdminPage";
+import TeamsSettingsPage from "@/pages/TeamsSettingsPage";
+import CustomAttributesPage from "@/pages/CustomAttributesPage";
+import AutomationRulesPage from "@/pages/AutomationRulesPage";
+import MacrosPage from "@/pages/MacrosPage";
+import AuditLogPage from "@/pages/AuditLogPage";
+import RolePermissionsPage from "@/pages/RolePermissionsPage";
+import SlaPoliciesPage from "@/pages/SlaPoliciesPage";
+import WorkflowSettingsPage from "@/pages/WorkflowSettingsPage";
+import SecuritySettingsPage from "@/pages/SecuritySettingsPage";
 
 const queryClient = new QueryClient();
 
@@ -35,19 +51,51 @@ const AppRoutes = () => {
   if (!currentOrg) return <OnboardingPage />;
 
   return (
-    <AppLayout>
-      <Routes>
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/conversations" element={<ConversationsPage />} />
-        <Route path="/contacts" element={<ContactsPage />} />
-        <Route path="/team" element={<TeamPage />} />
-        <Route path="/channels" element={<ChannelsPage />} />
-        <Route path="/labels" element={<LabelsPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="*" element={<NotFound />} />
-      </Routes>
-    </AppLayout>
+    <Routes>
+      <Route path="/integrations/meta/callback" element={<MetaOAuthCallbackPage />} />
+      <Route
+        path="*"
+        element={
+          <AppLayout>
+            <Routes>
+              <Route path="/" element={<Navigate to="/inbox" replace />} />
+              <Route path="/dashboard" element={<Navigate to="/inbox" replace />} />
+              <Route path="/inbox" element={<DashboardPage />} />
+              <Route path="/conversations" element={<ConversationsPage />} />
+              <Route path="/contacts" element={<ContactsPage />} />
+              <Route path="/reports" element={<AnalyticsPage />} />
+              <Route path="/analytics" element={<AnalyticsPage />} />
+              <Route path="/captain" element={<CaptainPage />} />
+              <Route path="/campaigns" element={<CampaignsPage />} />
+              <Route path="/help-center" element={<HelpCenterAdminPage />} />
+              <Route path="/settings" element={<Navigate to="/settings/account" replace />} />
+              <Route path="/settings/account" element={<SettingsPage />} />
+              <Route path="/settings/bots" element={<SettingsPage />} />
+              <Route path="/settings/webhooks" element={<SettingsPage />} />
+              <Route path="/settings/agents" element={<TeamPage />} />
+              <Route path="/settings/inboxes" element={<ChannelsPage />} />
+              <Route path="/settings/labels" element={<LabelsPage />} />
+              <Route path="/settings/canned-responses" element={<CannedResponsesPage />} />
+              <Route path="/settings/teams" element={<TeamsSettingsPage />} />
+              <Route path="/settings/attributes" element={<CustomAttributesPage />} />
+              <Route path="/settings/automation" element={<AutomationRulesPage />} />
+              <Route path="/settings/macros" element={<MacrosPage />} />
+              <Route path="/settings/audit" element={<AuditLogPage />} />
+              <Route path="/settings/roles" element={<RolePermissionsPage />} />
+              <Route path="/settings/sla" element={<SlaPoliciesPage />} />
+              <Route path="/settings/workflow" element={<WorkflowSettingsPage />} />
+              <Route path="/settings/security" element={<SecuritySettingsPage />} />
+              <Route path="/settings/integrations" element={<WebhooksPage />} />
+              <Route path="/team" element={<TeamPage />} />
+              <Route path="/channels" element={<ChannelsPage />} />
+              <Route path="/labels" element={<LabelsPage />} />
+              <Route path="/webhooks" element={<WebhooksPage />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </AppLayout>
+        }
+      />
+    </Routes>
   );
 };
 

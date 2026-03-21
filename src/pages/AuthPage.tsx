@@ -3,7 +3,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { MessageSquare, ArrowRight, Mail, Lock, User } from 'lucide-react';
+import { ArrowRight, Mail, Lock, User } from 'lucide-react';
+import { APP_LOGO_SRC, APP_NAME } from '@/constants/branding';
 
 const AuthPage: React.FC = () => {
   const { signIn, signUp } = useAuth();
@@ -34,10 +35,8 @@ const AuthPage: React.FC = () => {
       {/* Left panel */}
       <div className="hidden lg:flex lg:w-1/2 bg-sidebar flex-col justify-between p-12">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-sidebar-primary">
-            <MessageSquare className="h-5 w-5 text-sidebar-primary-foreground" />
-          </div>
-          <span className="text-xl font-semibold text-sidebar-foreground">OmniChat</span>
+          <img src={APP_LOGO_SRC} alt={APP_NAME} className="h-10 w-auto max-w-[180px] object-contain" />
+          <span className="text-xl font-semibold text-sidebar-foreground">{APP_NAME}</span>
         </div>
 
         <div className="space-y-6">
@@ -56,17 +55,17 @@ const AuthPage: React.FC = () => {
           </div>
         </div>
 
-        <p className="text-sm text-sidebar-muted">© 2025 OmniChat. Plataforma multi-tenant.</p>
+        <p className="text-sm text-sidebar-muted">
+          © {new Date().getFullYear()} Agents Labs. Plataforma multi-tenant.
+        </p>
       </div>
 
       {/* Right panel - form */}
       <div className="flex flex-1 items-center justify-center p-8">
         <div className="w-full max-w-md space-y-8 animate-fade-in">
-          <div className="lg:hidden flex items-center gap-3 justify-center mb-8">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
-              <MessageSquare className="h-5 w-5 text-primary-foreground" />
-            </div>
-            <span className="text-xl font-semibold">OmniChat</span>
+          <div className="lg:hidden flex flex-col items-center gap-2 justify-center mb-8 text-center">
+            <img src={APP_LOGO_SRC} alt={APP_NAME} className="h-12 w-auto max-w-[200px] object-contain" />
+            <span className="text-lg font-semibold">{APP_NAME}</span>
           </div>
 
           <div className="space-y-2">
