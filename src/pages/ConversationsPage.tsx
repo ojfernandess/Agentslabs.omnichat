@@ -59,7 +59,7 @@ const ConversationsPage: React.FC = () => {
         .order('last_message_at', { ascending: false });
 
       if (statusFilter !== 'all') {
-        query = query.eq('status', statusFilter);
+        query = query.eq('status', statusFilter as any);
       }
 
       const { data } = await query;
