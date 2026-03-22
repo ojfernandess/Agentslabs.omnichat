@@ -40,7 +40,8 @@ psql "$DATABASE_URL" -f supabase/migrations/...
 
 ## Easypanel
 
-- **Compose de referência:** `deploy/docker-compose.easypanel.yml` (na raiz do repo: `docker compose -f deploy/docker-compose.easypanel.yml --env-file .env up -d --build`).
+- **Compose Easypanel (recomendado):** `docker-compose.easypanel.yml` na **raiz** do repo — `docker compose -f docker-compose.easypanel.yml --env-file .env up -d --build`.
+- Alternativa: `deploy/docker-compose.easypanel.yml` (usa `context: ..`; no Easypanel prefira o ficheiro na raiz).
 - **GitHub Actions → imagem no GHCR:** ver **[EASYPANEL_GITHUB.md](./EASYPANEL_GITHUB.md)** (secrets, `skip_migrate`, uso de `ghcr.io/.../...:latest` no painel).
 
 Build direto no Easypanel (sem GHCR):

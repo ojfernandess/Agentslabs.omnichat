@@ -1,6 +1,30 @@
 # Easypanel + GitHub Actions (GHCR)
 
-Este guia liga o workflow **`.github/workflows/docker-deploy.yml`** ao deploy no **Easypanel** com o mesmo stack que `deploy/docker-compose.easypanel.yml`.
+**Repositório:** [github.com/ojfernandess/Agentslabs.omnichat](https://github.com/ojfernandess/Agentslabs.omnichat) · branch `main`.
+
+Este guia liga o workflow **`.github/workflows/docker-deploy.yml`** ao deploy no **Easypanel** com o mesmo stack que **`docker-compose.easypanel.yml`** (raiz do repo; espelho em `deploy/docker-compose.easypanel.yml`).
+
+## 0. Easypanel — ficheiro Compose e Dockerfile (erro "open Dockerfile: no such file")
+
+O Easypanel corre o build a partir da **raiz do repositório** clonado (`code/`). Use o compose **na raiz**:
+
+- **`docker-compose.easypanel.yml`** (na raiz) — `context: .` e `dockerfile: Dockerfile` encontram o ficheiro na raiz do clone.
+
+**Não** use apenas `deploy/docker-compose.easypanel.yml` no painel se o painel não mantiver a pasta `deploy/` no caminho esperado: o `context: ..` pode resolver mal e o Docker não encontra o `Dockerfile`.
+
+**No painel:** Compose file path = `docker-compose.easypanel.yml` (na raiz do repo).
+
+## 0b. Easypanel — variáveis para Docker Compose (erro "required variable is missing")
+
+O Compose **não** usa mais `${VAR:?}` nos build args (isso falhava no Easypanel quando as variáveis não estavam disponíveis na interpolação).
+
+1. No projeto Easypanel, abra **Environment** (ou equivalente) e crie pelo menos:
+   - `VITE_SUPABASE_URL` — URL do projeto Supabase (`https://xxx.supabase.co`)
+   - `VITE_SUPABASE_PUBLISHABLE_KEY` — chave **anon** (publishable)
+2. Nomes **idênticos** aos do ficheiro (maiúsculas e prefixo `VITE_`).
+3. Referência de nomes: **`deploy/easypanel.env.example`**.
+
+Sem estes valores, o build pode concluir mas o frontend fica sem API — confirme sempre após o primeiro deploy.
 
 ## 1. Secrets no GitHub
 
@@ -42,7 +66,7 @@ ghcr.io/<seu-usuario-ou-org>/<nome-do-repo>:<sha-do-commit>
 ## 3. Easypanel — opção A: Compose com imagem pré-buildada
 
 1. Crie um projeto no Easypanel e um serviço **Docker Compose**.
-2. Cole (ou monte por Git) o ficheiro `deploy/docker-compose.easypanel.yml`, mas **substitua o bloco `build`** por `image`:
+2. Cole (ou monte por Git) o ficheiro **`docker-compose.easypanel.yml`** da raiz, mas **substitua o bloco `build`** por `image`:
 
 ```yaml
 services:
@@ -70,7 +94,7 @@ Se não usar o job `migrate`, aplique SQL com:
 
 - Supabase Dashboard → SQL, ou  
 - `supabase db push` local, ou  
-- one-shot `db-init` com `docker compose -f deploy/docker-compose.easypanel.yml --profile migrate` e `DATABASE_URL` (ver comentários no compose).
+- one-shot `db-init` com `docker compose -f docker-compose.easypanel.yml --profile migrate` e `DATABASE_URL` (ver comentários no compose).
 
 ## 6. Erro `relation "…" already exists` no `db push`
 

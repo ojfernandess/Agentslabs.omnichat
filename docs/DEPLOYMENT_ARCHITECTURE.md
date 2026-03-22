@@ -100,7 +100,7 @@ Variáveis sensíveis (`SUPABASE_SERVICE_ROLE_KEY`, `INTERNAL_HOOK_SECRET`, etc.
 3. **App 2 (opcional) – Migrações:** imagem construída com `Dockerfile.db-init`, comando único, `DATABASE_URL` apontando ao Postgres do Supabase ou self-hosted.
 4. **Porta:** mapear `8080` → HTTP do container.
 
-Compose de referência: `deploy/docker-compose.easypanel.yml`.
+Compose de referência: **`docker-compose.easypanel.yml`** (raiz; Easypanel) ou `deploy/docker-compose.easypanel.yml`.
 
 ## Monitoramento e logs
 
