@@ -17,6 +17,8 @@
   </head>
 
   <body>
+    <!-- Facebook JS SDK: raiz estável fora do React (#root) para evitar o SDK a injectar nós em locais imprevisíveis -->
+    <div id="fb-root"></div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

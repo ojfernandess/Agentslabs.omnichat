@@ -21,15 +21,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useOrg } from '@/contexts/OrgContext';
 import type { ChannelProvider } from './providerCatalog';
-import type { Database } from '@/integrations/supabase/types';
+import type { Database, Json } from '@/integrations/supabase/types';
 import { toast } from 'sonner';
-import { Copy, Check, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { Copy, Check, ChevronLeft, ChevronRight, Phone } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getMetaAppId, startMetaBusinessOAuth } from '@/lib/metaOAuth';
-import {
-  getMetaEmbeddedSignupConfigId,
-  launchMetaEmbeddedSignup,
-} from '@/lib/metaEmbeddedSignup';
 
 type ChannelType = Database['public']['Enums']['channel_type'];
 
@@ -211,7 +207,8 @@ const InboxWizard: React.FC<Props> = ({
   const [form, setForm] = useState<WizardForm>(emptyForm());
   const [created, setCreated] = useState<CreatedChannel | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
-  const [metaEmbeddedLoading, setMetaEmbeddedLoading] = useState(false);
+  /** WhatsApp: mostrar campos WABA/token só após pedir configuração manual (fluxo tipo Chatwoot). */
+  const [whatsappManualConfig, setWhatsappManualConfig] = useState(false);
 
   useEffect(() => {
     if (!open || !metaPrefill || provider?.dbType !== 'whatsapp') return;
@@ -284,6 +281,7 @@ const InboxWizard: React.FC<Props> = ({
     setForm(emptyForm());
     setCreated(null);
     setCopied(null);
+    setWhatsappManualConfig(false);
   };
 
   const handleClose = (v: boolean) => {
@@ -294,7 +292,7 @@ const InboxWizard: React.FC<Props> = ({
   const createMutation = useMutation({
     mutationFn: async () => {
       if (!currentOrg || !provider?.dbType) throw new Error('Organização ou canal inválido');
-      const config = buildConfig(provider, form, baseUrl);
+      const config = buildConfig(provider, form, baseUrl) as Json;
       const { data, error } = await supabase
         .from('channels')
         .insert({
@@ -313,7 +311,7 @@ const InboxWizard: React.FC<Props> = ({
         const { error: linkErr } = await supabase.from('channel_agent_bots').insert({
           channel_id: data.id,
           agent_bot_id: form.agent_bot_id,
-          settings: { bot_responds_first: true },
+          settings: { bot_responds_first: true } as Json,
         });
         if (linkErr) throw linkErr;
       }
@@ -389,120 +387,119 @@ const InboxWizard: React.FC<Props> = ({
     switch (provider.dbType) {
       case 'whatsapp':
         return (
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Credenciais da Meta (WhatsApp Cloud API). O webhook será registrado no painel da Meta
-              apontando para a URL exibida após a criação.
-            </p>
-            <div className="flex flex-col gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  disabled={
-                    !currentOrg ||
-                    !getMetaAppId() ||
-                    !getMetaEmbeddedSignupConfigId() ||
-                    metaEmbeddedLoading
-                  }
-                  onClick={async () => {
-                    if (!currentOrg) return;
-                    setMetaEmbeddedLoading(true);
-                    try {
-                      const result = await launchMetaEmbeddedSignup(currentOrg.id);
-                      setForm((f) => ({
-                        ...f,
-                        name:
-                          f.name.trim() ||
-                          (result.business_name ? result.business_name : f.name),
-                        waba_id: result.waba_id || f.waba_id,
-                        phone_number_id: result.phone_number_id || f.phone_number_id,
-                        access_token: result.access_token || f.access_token,
-                        verify_token: result.verify_token || f.verify_token,
-                      }));
-                      toast.success('Cadastro incorporado concluído. Revise os campos e avance.');
-                    } catch (e) {
-                      toast.error((e as Error).message);
-                    } finally {
-                      setMetaEmbeddedLoading(false);
-                    }
-                  }}
-                >
-                  {metaEmbeddedLoading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      A ligar à Meta…
-                    </>
-                  ) : (
-                    'Cadastro incorporado (Embedded Signup)'
+          <div className="space-y-6">
+            <div className="rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden">
+              <div className="flex flex-col gap-4 p-6 sm:p-8">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#25D366]/15 text-[#25D366]">
+                    <Phone className="h-6 w-6" strokeWidth={2} />
+                  </div>
+                  <div className="space-y-1 min-w-0">
+                    <h3 className="text-lg font-semibold leading-tight">
+                      Configuração rápida com Meta
+                    </h3>
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      Utilize o fluxo de inscrição com a Meta para ligar os seus números. Será
+                      redirecionado para iniciar sessão na conta WhatsApp Business — recomendamos
+                      acesso de administrador.
+                    </p>
+                  </div>
+                </div>
+                <ul className="space-y-2.5 text-sm">
+                  {[
+                    'Sem configuração manual obrigatória quando concluir o OAuth com sucesso.',
+                    'Autenticação OAuth segura com a Meta.',
+                    'Após a ligação, configure webhooks e números no painel (instruções após criar a caixa).',
+                  ].map((line) => (
+                    <li key={line} className="flex gap-2.5">
+                      <Check className="h-4 w-4 shrink-0 text-[#25D366] mt-0.5" aria-hidden />
+                      <span className="text-muted-foreground">{line}</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="flex flex-col gap-3 pt-1">
+                  <Button
+                    type="button"
+                    size="lg"
+                    className="w-full sm:w-auto h-12 px-8 text-base font-medium bg-[#25D366] hover:bg-[#20BD5A] text-white shadow-sm border-0"
+                    disabled={!currentOrg || !getMetaAppId()}
+                    onClick={() => {
+                      if (!currentOrg) return;
+                      try {
+                        startMetaBusinessOAuth(currentOrg.id);
+                      } catch (e) {
+                        toast.error((e as Error).message);
+                      }
+                    }}
+                  >
+                    Conecte-se com WhatsApp Business
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Registe{' '}
+                    <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
+                      {baseUrl}/integrations/meta/callback
+                    </code>{' '}
+                    no Meta App (Facebook Login OAuth) e o domínio em &quot;Allowed domains&quot;.
+                  </p>
+                  {!getMetaAppId() && (
+                    <p className="text-xs text-destructive">Defina META_APP_ID no .env.</p>
                   )}
-                </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={!currentOrg || !getMetaAppId() || metaEmbeddedLoading}
-                  onClick={() => {
-                    if (!currentOrg) return;
-                    try {
-                      startMetaBusinessOAuth(currentOrg.id);
-                    } catch (e) {
-                      toast.error((e as Error).message);
-                    }
-                  }}
-                >
-                  OAuth em nova página
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground max-w-xl">
-                Embedded Signup usa o SDK da Meta e o{' '}
-                <code className="text-[10px]">config_id</code> do Facebook Login for Business.
-                Domínio deve estar em &quot;Allowed domains&quot; e OAuth activado no painel da app.
-              </p>
-              {!getMetaAppId() && (
-                <span className="text-xs text-destructive">
-                  Defina VITE_META_APP_ID no .env.
-                </span>
-              )}
-              {getMetaAppId() && !getMetaEmbeddedSignupConfigId() && (
-                <span className="text-xs text-muted-foreground">
-                  Para o botão Embedded Signup: crie uma configuração em Facebook Login for Business
-                  (template WhatsApp Embedded Signup) e defina VITE_META_EMBEDDED_SIGNUP_CONFIG_ID.
-                </span>
-              )}
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label>WABA ID</Label>
-                <Input
-                  value={form.waba_id}
-                  onChange={(e) => setForm({ ...form, waba_id: e.target.value })}
-                  placeholder="WhatsApp Business Account ID"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Phone Number ID</Label>
-                <Input
-                  value={form.phone_number_id}
-                  onChange={(e) => setForm({ ...form, phone_number_id: e.target.value })}
-                />
+                  <button
+                    type="button"
+                    className="text-left text-sm text-primary hover:underline underline-offset-4 w-fit"
+                    onClick={() => setWhatsappManualConfig((v) => !v)}
+                  >
+                    {whatsappManualConfig
+                      ? 'Ocultar configuração manual'
+                      : 'Use o fluxo de configuração manual se o número já está na API ou é um parceiro técnico.'}
+                  </button>
+                </div>
               </div>
             </div>
-            <div className="space-y-2">
-              <Label>Access Token (System User)</Label>
-              <Input
-                type="password"
-                value={form.access_token}
-                onChange={(e) => setForm({ ...form, access_token: e.target.value })}
-                autoComplete="off"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Verify Token (webhook)</Label>
-              <Input
-                value={form.verify_token}
-                onChange={(e) => setForm({ ...form, verify_token: e.target.value })}
-                placeholder="Token que você configurará no Meta App"
-              />
-            </div>
+
+            {whatsappManualConfig && (
+              <div className="space-y-4 rounded-lg border border-dashed bg-muted/20 p-4">
+                <p className="text-sm font-medium">Credenciais manuais (WhatsApp Cloud API)</p>
+                <p className="text-xs text-muted-foreground">
+                  Preencha os campos abaixo se não utilizar OAuth. O webhook será configurado na Meta
+                  com a URL indicada após criar a caixa.
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>WABA ID</Label>
+                    <Input
+                      value={form.waba_id}
+                      onChange={(e) => setForm({ ...form, waba_id: e.target.value })}
+                      placeholder="WhatsApp Business Account ID"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Phone Number ID</Label>
+                    <Input
+                      value={form.phone_number_id}
+                      onChange={(e) => setForm({ ...form, phone_number_id: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Access Token (System User)</Label>
+                  <Input
+                    type="password"
+                    value={form.access_token}
+                    onChange={(e) => setForm({ ...form, access_token: e.target.value })}
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Verify Token (webhook)</Label>
+                  <Input
+                    value={form.verify_token}
+                    onChange={(e) => setForm({ ...form, verify_token: e.target.value })}
+                    placeholder="Token que você configurará no Meta App"
+                  />
+                </div>
+              </div>
+            )}
           </div>
         );
       case 'messenger':
@@ -932,12 +929,39 @@ const InboxWizard: React.FC<Props> = ({
   const stepTitle = () => {
     if (created) return 'Caixa criada';
     if (!provider) return '';
+    if (provider.dbType === 'whatsapp') {
+      if (step === 0) return 'Informações da caixa';
+      if (step === 1) return 'Configuração rápida com Meta';
+      if (step === 2) return 'Mensagens, equipa e SLA';
+      return 'Rever e criar';
+    }
     if (step === 0) return 'Informações básicas';
     if (dbType === 'api' && step === 1) return 'Comportamento e automação';
     if (step === 1) return 'Credenciais do canal';
     if (step === 2) return 'Mensagens, SLA e robô';
     return 'Revisão';
   };
+
+  const isWhatsappWizard = provider?.dbType === 'whatsapp' && !created;
+
+  const whatsappSidebarSteps = [
+    { title: 'Escolha o Canal', subtitle: 'WhatsApp selecionado' },
+    { title: 'Criar Caixa de Entrada', subtitle: 'Autentique a conta e crie a inbox' },
+    { title: 'Adicionar Agentes', subtitle: 'Equipa e robô opcional' },
+    { title: 'Então!', subtitle: 'Rever e criar a caixa' },
+  ] as const;
+
+  const whatsappStepDone = (i: number) =>
+    i === 0 ? true : i === 1 ? step >= 2 : i === 2 ? step >= 3 : false;
+
+  const whatsappStepCurrent = (i: number) =>
+    i === 0
+      ? false
+      : i === 1
+        ? step <= 1
+        : i === 2
+          ? step === 2
+          : step === 3;
 
   const renderStepBody = () => {
     if (created) return renderSuccess();
@@ -974,67 +998,136 @@ const InboxWizard: React.FC<Props> = ({
     return renderReview();
   };
 
+  const footerNav = (
+    <div className="flex justify-between gap-2 pt-2">
+      {!created ? (
+        <>
+          <Button type="button" variant="ghost" onClick={() => handleClose(false)}>
+            Cancelar
+          </Button>
+          <div className="flex gap-2">
+            {step > 0 && (
+              <Button type="button" variant="outline" onClick={back}>
+                <ChevronLeft className="h-4 w-4 mr-1" />
+                Voltar
+              </Button>
+            )}
+            <Button
+              type="button"
+              onClick={next}
+              disabled={!canNext() || createMutation.isPending}
+            >
+              {step < stepsCount - 1 ? (
+                <>
+                  Avançar
+                  <ChevronRight className="h-4 w-4 ml-1" />
+                </>
+              ) : (
+                'Criar caixa'
+              )}
+            </Button>
+          </div>
+        </>
+      ) : (
+        <Button type="button" className="w-full" onClick={() => handleClose(false)}>
+          Fechar
+        </Button>
+      )}
+    </div>
+  );
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            {provider?.name ?? 'Nova caixa'}
-          </DialogTitle>
-          <DialogDescription>{stepTitle()}</DialogDescription>
-        </DialogHeader>
-
-        {!created && provider && (
-          <div className="flex gap-1 mb-2">
-            {Array.from({ length: stepsCount }).map((_, i) => (
-              <div
-                key={i}
-                className={cn(
-                  'h-1 flex-1 rounded-full transition-colors',
-                  i <= step ? 'bg-primary' : 'bg-muted'
-                )}
-              />
-            ))}
-          </div>
+      <DialogContent
+        className={cn(
+          'max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden',
+          isWhatsappWizard ? 'max-w-4xl' : 'max-w-lg overflow-y-auto'
         )}
-
-        {renderStepBody()}
-
-        <div className="flex justify-between gap-2 pt-2">
-          {!created ? (
-            <>
-              <Button type="button" variant="ghost" onClick={() => handleClose(false)}>
-                Cancelar
-              </Button>
-              <div className="flex gap-2">
-                {step > 0 && (
-                  <Button type="button" variant="outline" onClick={back}>
-                    <ChevronLeft className="h-4 w-4 mr-1" />
-                    Voltar
-                  </Button>
-                )}
-                <Button
-                  type="button"
-                  onClick={next}
-                  disabled={!canNext() || createMutation.isPending}
-                >
-                  {step < stepsCount - 1 ? (
-                    <>
-                      Avançar
-                      <ChevronRight className="h-4 w-4 ml-1" />
-                    </>
-                  ) : (
-                    'Criar caixa'
-                  )}
-                </Button>
+      >
+        {isWhatsappWizard ? (
+          <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+            <aside className="w-full shrink-0 border-b bg-muted/25 sm:w-56 sm:border-b-0 sm:border-r sm:bg-muted/15">
+              <nav className="flex gap-2 overflow-x-auto p-4 sm:flex-col sm:gap-0 sm:p-5">
+                <p className="hidden text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:mb-4 sm:block">
+                  Assistente
+                </p>
+                <ol className="flex min-w-0 gap-3 sm:flex-col sm:gap-5">
+                  {whatsappSidebarSteps.map((s, i) => {
+                    const done = whatsappStepDone(i);
+                    const current = whatsappStepCurrent(i);
+                    return (
+                      <li key={s.title} className="flex min-w-[140px] gap-3 sm:min-w-0">
+                        <div
+                          className={cn(
+                            'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
+                            done && 'bg-primary text-primary-foreground',
+                            !done && current && 'border-2 border-primary bg-background text-primary',
+                            !done && !current && 'border border-muted-foreground/25 text-muted-foreground'
+                          )}
+                          aria-current={current ? 'step' : undefined}
+                        >
+                          {done ? <Check className="h-4 w-4" strokeWidth={2.5} /> : i + 1}
+                        </div>
+                        <div className="min-w-0 pt-0.5">
+                          <p
+                            className={cn(
+                              'text-sm font-medium leading-tight',
+                              current && 'text-foreground',
+                              !current && 'text-muted-foreground'
+                            )}
+                          >
+                            {s.title}
+                          </p>
+                          <p className="mt-0.5 text-xs text-muted-foreground leading-snug">{s.subtitle}</p>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </nav>
+            </aside>
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <div className="min-h-0 flex-1 overflow-y-auto p-6">
+                <DialogHeader className="space-y-1.5 pb-4 text-left">
+                  <DialogTitle className="text-xl">{provider?.name ?? 'WhatsApp'}</DialogTitle>
+                  <DialogDescription>{stepTitle()}</DialogDescription>
+                </DialogHeader>
+                {renderStepBody()}
               </div>
-            </>
-          ) : (
-            <Button type="button" className="w-full" onClick={() => handleClose(false)}>
-              Fechar
-            </Button>
-          )}
-        </div>
+              <div className="shrink-0 border-t bg-background/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+                {footerNav}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="flex max-h-[90vh] flex-col overflow-y-auto p-6">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  {provider?.name ?? 'Nova caixa'}
+                </DialogTitle>
+                <DialogDescription>{stepTitle()}</DialogDescription>
+              </DialogHeader>
+
+              {!created && provider && (
+                <div className="mb-2 flex gap-1">
+                  {Array.from({ length: stepsCount }).map((_, i) => (
+                    <div
+                      key={i}
+                      className={cn(
+                        'h-1 flex-1 rounded-full transition-colors',
+                        i <= step ? 'bg-primary' : 'bg-muted'
+                      )}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {renderStepBody()}
+              {footerNav}
+            </div>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );

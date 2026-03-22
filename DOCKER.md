@@ -39,7 +39,7 @@ No push para `main` (ou execução manual):
 | Secret | Descrição |
 |--------|-----------|
 | `SUPABASE_DB_PASSWORD` | Database password (se o CLI pedir ao `link`) |
-| `VITE_META_APP_ID`, `VITE_PUBLIC_APP_URL`, … | Ver comentários no workflow |
+| `META_APP_ID`, `VITE_PUBLIC_APP_URL`, `VITE_INTERNAL_HOOK_SECRET` | Opcionais — ver workflow |
 
 ### Imagem no servidor
 

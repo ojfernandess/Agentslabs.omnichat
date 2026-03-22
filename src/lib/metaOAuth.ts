@@ -5,10 +5,9 @@
  *
  * No Meta App → Facebook Login → Definições → URIs de redirecionamento OAuth válidos:
  *   ex.: https://seu-dominio.com/integrations/meta/callback
- *   dev: http://localhost:5173/integrations/meta/callback
+ *   dev: http://localhost:8080/integrations/meta/callback
  *
- * Embedded Signup (SDK + config_id): ver metaEmbeddedSignup.ts e
- * VITE_META_EMBEDDED_SIGNUP_CONFIG_ID (Facebook Login for Business → Configurations).
+ * Variável de ambiente: META_APP_ID (ver vite.config.ts).
  */
 
 export const META_OAUTH_SCOPES = [
@@ -21,13 +20,12 @@ const STORAGE_STATE = 'meta_oauth_state';
 const STORAGE_ORG = 'meta_oauth_org_id';
 
 export function getMetaAppId(): string | undefined {
-  const id = import.meta.env.VITE_META_APP_ID as string | undefined;
+  const id = import.meta.env.META_APP_ID as string | undefined;
   return id && id.length > 0 ? id : undefined;
 }
 
+/** URL exacta a registar no Meta App (OAuth redirect). */
 export function getMetaOAuthRedirectUri(): string {
-  const env = import.meta.env.VITE_META_OAUTH_REDIRECT_URI as string | undefined;
-  if (env && env.length > 0) return env.replace(/\/$/, '');
   if (typeof window !== 'undefined') {
     return `${window.location.origin}/integrations/meta/callback`;
   }
@@ -39,7 +37,7 @@ export function startMetaBusinessOAuth(organizationId: string): void {
   const appId = getMetaAppId();
   const redirectUri = getMetaOAuthRedirectUri();
   if (!appId) {
-    throw new Error('Defina VITE_META_APP_ID no .env');
+    throw new Error('Defina META_APP_ID no .env');
   }
   const state = crypto.randomUUID();
   sessionStorage.setItem(STORAGE_STATE, state);
