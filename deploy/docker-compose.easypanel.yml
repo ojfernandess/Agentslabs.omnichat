@@ -1,5 +1,10 @@
 # Stack sugerida para Easypanel / Docker Compose (mesmo servidor, estilo Chatwoot).
 #
+# ⚠️ ESTE FICHEIRO ESTÁ EM deploy/ — USA `context: ..` (pai = raiz do repo).
+#    NÃO o copie para `docker-compose.yml` na raiz sem trocar para `context: .` e
+#    `dockerfile: Dockerfile` — isso causa "open Dockerfile: no such file" no Easypanel.
+#    No painel use o compose na RAIZ: `docker-compose.yml` ou `docker-compose.easypanel.yml`.
+#
 # Repositório Git (clone / integração CI):
 #   https://github.com/ojfernandess/Agentslabs.omnichat
 #   branch padrão: main

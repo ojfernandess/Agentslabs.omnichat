@@ -6,20 +6,34 @@ Este guia liga o workflow **`.github/workflows/docker-deploy.yml`** ao deploy no
 
 ## 0. Easypanel — ficheiro Compose e Dockerfile (erro "open Dockerfile: no such file")
 
-O Easypanel invoca por defeito **`docker-compose.yml`** na raiz do clone (`code/docker-compose.yml`), **não** `docker-compose.easypanel.yml`. O repositório define **`docker-compose.yml`** com:
+O Easypanel corre **sempre** (típico):
 
-- `build.context: .` (raiz do repositório)
-- `dockerfile: Dockerfile` (ficheiro na raiz: `./Dockerfile`)
+```text
+docker compose -f .../code/docker-compose.yml -f .../code/docker-compose.override.yml up --build
+```
 
-**Atualize o repositório** no Easypanel (pull / redeploy) para trazer este `docker-compose.yml`.
+Ou seja: o ficheiro **principal** é **`docker-compose.yml`** na pasta `code/` do projeto (clone do Git), **mais** um **`docker-compose.override.yml`** gerado pelo painel. **Não** é automático o uso de `docker-compose.easypanel.yml` nem de `deploy/docker-compose.easypanel.yml`, a menos que no projeto defina o nome do ficheiro Compose.
 
-Se o erro continuar, abra **`docker-compose.override.yml`** gerado pelo painel: se o serviço `web` **substituir** o `build` sem `dockerfile` ou com `context` errado, corrija no UI ou remova o override conflituoso.
+O repositório na **raiz** tem **`docker-compose.yml`** correto com:
 
-Alternativa explícita: aponte o compose para **`docker-compose.easypanel.yml`** (equivalente, default `VITE_DEPLOYMENT_MODE=easypanel`).
+- `build.context: .` (pasta do clone = raiz do repo, onde está o `Dockerfile`)
+- `dockerfile: Dockerfile`
 
-**Não** use `deploy/docker-compose.easypanel.yml` no painel se o `context: ..` não resolver à raiz do clone.
+**Atualize o repositório** no Easypanel (pull / redeploy) para trazer este `docker-compose.yml` e o `Dockerfile` na raiz.
 
-**No painel:** deixe o path por defeito **`docker-compose.yml`** ou escolha **`docker-compose.easypanel.yml`** (ambos na raiz).
+### Causa mais comum deste erro
+
+O ficheiro **`deploy/docker-compose.easypanel.yml`** usa **`context: ..`** porque o compose está em `deploy/` (o pai é a raiz do repo). Se **copiar esse YAML para a raiz** como `docker-compose.yml` **sem mudar** `context`, fica `..` = **pasta acima do clone** → **não existe `Dockerfile`** (log pode mostrar `transferring dockerfile: 2B`).
+
+**Correção:** use o `docker-compose.yml` **oficial na raiz do repo** (já com `context: .`), ou na raiz use **`docker-compose.easypanel.yml`** — **não** o ficheiro de `deploy/` colado na raiz sem ajustar paths.
+
+### Se o erro continuar
+
+1. No projeto Easypanel, confirme **nome do ficheiro Compose** (ex.: `docker-compose.yml` ou `docker-compose.easypanel.yml` **só na raiz do repo**).
+2. Abra **`docker-compose.override.yml`**: se o serviço `web` **substituir** o `build` sem `dockerfile` ou com `context` errado, corrija no UI.
+3. **Não** aponte o painel para `deploy/docker-compose.easypanel.yml` se o Easypanel não resolver `context: ..` em relação ao clone (prefira os ficheiros na **raiz**).
+
+**No painel:** por defeito **`docker-compose.yml`** ou, se quiser default `VITE_DEPLOYMENT_MODE=easypanel`, **`docker-compose.easypanel.yml`** (ambos na raiz do repositório).
 
 ## 0b. Easypanel — variáveis para Docker Compose (erro "required variable is missing")
 

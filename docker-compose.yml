@@ -1,5 +1,7 @@
 # Ficheiro padrão: `docker compose up` local e Easypanel (usa este nome: docker-compose.yml).
 # Build: context = raiz do repo → ./Dockerfile (obrigatório existir).
+# IMPORTANTE: use sempre `context: .` aqui. NÃO copie deploy/docker-compose.easypanel.yml para a raiz
+# sem alterar `context: ..` → `context: .` (senão o build procura Dockerfile fora do repo).
 #
 # Easypanel: não altere para outro path sem copiar também o Dockerfile para o contexto.
 # Repositório: https://github.com/ojfernandess/Agentslabs.omnichat

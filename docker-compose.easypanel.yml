@@ -1,5 +1,7 @@
 # Opcional: como docker-compose.yml, com VITE_DEPLOYMENT_MODE default = easypanel.
 # O painel usa por defeito docker-compose.yml (na raiz) — já com context . e Dockerfile corretos.
+# No Easypanel: em Docker Compose → nome do ficheiro, pode definir explicitamente
+# `docker-compose.easypanel.yml` se não quiser o default `docker-compose.yml`.
 #
 # Repositório: https://github.com/ojfernandess/Agentslabs.omnichat
 # Ver: deploy/EASYPANEL_GITHUB.md, deploy/easypanel.env.example
