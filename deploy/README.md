@@ -18,7 +18,7 @@ Abra `http://localhost:${WEB_PORT:-8080}` e configure `.env` com `VITE_SUPABASE_
 |----------|-----|
 | `Dockerfile` | Build multi-stage: Node → Nginx com SPA |
 | `nginx.conf` | SPA fallback + gzip |
-| `docker-compose.yml` (raiz) | Serviço `web` — padrão Easypanel (`expose` 80, sem `ports` no host) |
+| `docker-compose.yml` (raiz) | Serviço `web` — Easypanel: proxy **80 ou 8080** (Nginx escuta nas duas; `expose`, sem `ports` no host) |
 | `docker-compose.local.yml` (raiz) | Opcional: `ports` para testar em `localhost:8080` |
 | `docker-compose.easypanel.yml` (raiz) | Igual à easypanel; `VITE_DEPLOYMENT_MODE` default `easypanel` |
 | `docker-compose.selfhosted.yml` | Exemplo com variáveis para backend self-hosted |
@@ -54,7 +54,7 @@ Build direto no Easypanel (sem GHCR):
 2. **Dockerfile path:** `Dockerfile` na **raiz** (o workflow CI usa o mesmo ficheiro).
 3. **Build context:** raiz (`.`).
 4. **Build args:** `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` e opcionais (ver `.env.example` e `Dockerfile`).
-5. Porta **interna** do container: **80** — no Easypanel use **Domains / Proxy** apontando para **80** (não é preciso `ports:` no compose; evita o aviso de conflito).
+5. Porta **interna** no Easypanel (**Domains & Proxy** → **proxy port**): **80** ou **8080** — o Nginx da imagem escuta em ambas (não use 3000). Não é preciso `ports:` no compose.
 
 ## Edge Functions self-hosted
 

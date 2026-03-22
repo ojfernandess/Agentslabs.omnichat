@@ -56,11 +56,20 @@ Sem estes valores no build, o deploy conclui mas o SPA não liga ao Supabase.
 
 ## 0c. Aviso "ports is used in web" / conflito de portas
 
-O **`docker-compose.yml`** na raiz **não** publica portas no host (`8080:80`); só **`expose: "80"`** para a rede Docker. O Easypanel encaminha o tráfego pelo **proxy interno** para a **porta 80 do container**.
+O **`docker-compose.yml`** na raiz **não** publica portas no host (`8080:80`); só **`expose`** para a rede Docker. O Easypanel encaminha o tráfego pelo **proxy interno** para a **porta do container**.
 
-- No projeto → **Domains** (ou **Proxy**), defina o alvo como **porta interna 80** do serviço `web`.
+- No projeto → **Domains** (ou **Proxy**), defina o alvo como **porta interna 80 ou 8080** do serviço `web` (a imagem Nginx escuta em **ambas** — ver `docker/nginx.conf`).
 - Se ainda vir o aviso, pode ser cache de um compose antigo: faça **pull** do repo e **redeploy**, ou remova `ports` de um `docker-compose.override.yml` manual no servidor.
 - **Desenvolvimento local** com `localhost:8080`: use `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d` (ver `docker-compose.local.yml`).
+
+## 0d. Domínio não abre / 502 / timeout (container a correr, Nginx “ok” nos logs)
+
+O Easypanel usa **Traefik** e pede a **porta do proxy** (porta em que a app **escuta** dentro do container). A [documentação](https://easypanel.io/docs/services/app) fala em “proxy port” (ex.: 3000, 8000).
+
+- Se estiver **3000**, **8080** errado ou vazio, o proxy não encontra o Nginx → **502** ou **site não carrega**.
+- **Correção no painel:** serviço **web** → **Domains & Proxy** → **Proxy port** / **Internal port** = **80** ou **8080** (o stack deste repo expõe **80 e 8080** no mesmo Nginx).
+- Confirme que o **domínio** está associado ao serviço **web** (Compose), não a outro serviço.
+- Teste rápido no servidor: `curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1/health` dentro da rede do stack (ou `docker exec` no container `web`).
 
 ## 1. Secrets no GitHub
 

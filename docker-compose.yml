@@ -27,6 +27,7 @@ services:
     # Local: `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`
     expose:
       - "80"
+      - "8080"
     labels:
       org.opencontainers.image.source: "https://github.com/ojfernandess/Agentslabs.omnichat"
       org.opencontainers.image.title: "Agentslabs Omni Chat"

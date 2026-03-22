@@ -52,6 +52,7 @@ services:
         VITE_EXTERNAL_MEDIA_UPLOAD_URL: ${VITE_EXTERNAL_MEDIA_UPLOAD_URL:-}
     expose:
       - "80"
+      - "8080"
     labels:
       org.opencontainers.image.source: "https://github.com/ojfernandess/Agentslabs.omnichat"
       org.opencontainers.image.title: "Agentslabs Omni Chat"
