@@ -1,0 +1,9 @@
+# Sobreposição opcional: expor o Nginx no host (desenvolvimento local).
+# Uso: docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+#
+# Não é necessário no Easypanel (o proxy do painel encaminha para a porta interna 80).
+
+services:
+  web:
+    ports:
+      - "${WEB_PORT:-8080}:80"

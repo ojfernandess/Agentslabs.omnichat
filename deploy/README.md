@@ -5,10 +5,12 @@
 ```bash
 cd ..   # raiz do repositório
 docker compose build
-docker compose up -d
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
 ```
 
 Abra `http://localhost:${WEB_PORT:-8080}` e configure `.env` com `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY`.
+
+(O ficheiro **`docker-compose.local.yml`** mapeia `8080→80` no host; o compose base não expõe portas — compatível com Easypanel.)
 
 ## Ficheiros
 
@@ -16,7 +18,8 @@ Abra `http://localhost:${WEB_PORT:-8080}` e configure `.env` com `VITE_SUPABASE_
 |----------|-----|
 | `Dockerfile` | Build multi-stage: Node → Nginx com SPA |
 | `nginx.conf` | SPA fallback + gzip |
-| `docker-compose.yml` (raiz) | Serviço `web` — padrão Easypanel |
+| `docker-compose.yml` (raiz) | Serviço `web` — padrão Easypanel (`expose` 80, sem `ports` no host) |
+| `docker-compose.local.yml` (raiz) | Opcional: `ports` para testar em `localhost:8080` |
 | `docker-compose.easypanel.yml` (raiz) | Igual à easypanel; `VITE_DEPLOYMENT_MODE` default `easypanel` |
 | `docker-compose.selfhosted.yml` | Exemplo com variáveis para backend self-hosted |
 | `k8s/web-deployment.yaml` | Deployment + Service + Ingress opcional |
@@ -51,7 +54,7 @@ Build direto no Easypanel (sem GHCR):
 2. **Dockerfile path:** `Dockerfile` na **raiz** (o workflow CI usa o mesmo ficheiro).
 3. **Build context:** raiz (`.`).
 4. **Build args:** `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` e opcionais (ver `.env.example` e `Dockerfile`).
-5. Porta do container: **80** (mapeie para 8080/HTTPS no proxy do Easypanel).
+5. Porta **interna** do container: **80** — no Easypanel use **Domains / Proxy** apontando para **80** (não é preciso `ports:` no compose; evita o aviso de conflito).
 
 ## Edge Functions self-hosted
 

@@ -33,6 +33,14 @@ O Compose **não** usa mais `${VAR:?}` nos build args (isso falhava no Easypanel
 
 Sem estes valores, o build pode concluir mas o frontend fica sem API — confirme sempre após o primeiro deploy.
 
+## 0c. Aviso "ports is used in web" / conflito de portas
+
+O **`docker-compose.yml`** na raiz **não** publica portas no host (`8080:80`); só **`expose: "80"`** para a rede Docker. O Easypanel encaminha o tráfego pelo **proxy interno** para a **porta 80 do container**.
+
+- No projeto → **Domains** (ou **Proxy**), defina o alvo como **porta interna 80** do serviço `web`.
+- Se ainda vir o aviso, pode ser cache de um compose antigo: faça **pull** do repo e **redeploy**, ou remova `ports` de um `docker-compose.override.yml` manual no servidor.
+- **Desenvolvimento local** com `localhost:8080`: use `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d` (ver `docker-compose.local.yml`).
+
 ## 1. Secrets no GitHub
 
 **Repositório → Settings → Secrets and variables → Actions → New repository secret**

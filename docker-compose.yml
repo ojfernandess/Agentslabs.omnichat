@@ -21,8 +21,10 @@ services:
         VITE_INTERNAL_HOOK_SECRET: ${VITE_INTERNAL_HOOK_SECRET:-}
         VITE_EXTERNAL_MEDIA_STORAGE: ${VITE_EXTERNAL_MEDIA_STORAGE:-}
         VITE_EXTERNAL_MEDIA_UPLOAD_URL: ${VITE_EXTERNAL_MEDIA_UPLOAD_URL:-}
-    ports:
-      - "${WEB_PORT:-8080}:80"
+    # Sem `ports` no host: o Easypanel usa proxy interno — ver deploy/EASYPANEL_GITHUB.md §0c.
+    # Local: `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`
+    expose:
+      - "80"
     labels:
       org.opencontainers.image.source: "https://github.com/ojfernandess/Agentslabs.omnichat"
       org.opencontainers.image.title: "Agentslabs Omni Chat"
