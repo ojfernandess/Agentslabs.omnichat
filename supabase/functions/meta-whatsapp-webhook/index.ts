@@ -1,8 +1,63 @@
 /**
- * Edge Function monolítica (sem imports locais) — requisito do bundle no deploy Supabase.
- * Edite também supabase/functions/_shared/ e sincronize se usar cópia.
+ * Webhook Meta WhatsApp — S3/MinIO inline (deploy cloud não inclui ../_shared).
  */
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { PutObjectCommand, S3Client } from "npm:@aws-sdk/client-s3@3.654.0";
+
+function s3MediaConfigured(): boolean {
+  return Boolean(
+    Deno.env.get("S3_MEDIA_ENDPOINT")?.trim() &&
+      Deno.env.get("S3_MEDIA_ACCESS_KEY")?.trim() &&
+      Deno.env.get("S3_MEDIA_SECRET_KEY")?.trim() &&
+      Deno.env.get("MEDIA_PUBLIC_BASE_URL")?.trim(),
+  );
+}
+
+let _s3MediaClient: S3Client | null = null;
+
+function getS3MediaClient(): S3Client {
+  if (_s3MediaClient) return _s3MediaClient;
+  const endpoint = Deno.env.get("S3_MEDIA_ENDPOINT")!.trim();
+  const region = Deno.env.get("S3_MEDIA_REGION")?.trim() || "us-east-1";
+  const forcePathStyle = Deno.env.get("S3_MEDIA_FORCE_PATH_STYLE") !== "false";
+  _s3MediaClient = new S3Client({
+    region,
+    endpoint,
+    credentials: {
+      accessKeyId: Deno.env.get("S3_MEDIA_ACCESS_KEY")!.trim(),
+      secretAccessKey: Deno.env.get("S3_MEDIA_SECRET_KEY")!.trim(),
+    },
+    forcePathStyle,
+  });
+  return _s3MediaClient;
+}
+
+async function s3PutObject(
+  bucket: string,
+  key: string,
+  body: Uint8Array,
+  contentType: string,
+): Promise<void> {
+  const client = getS3MediaClient();
+  await client.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+    }),
+  );
+}
+
+function publicUrlForS3Object(bucket: string, key: string): string {
+  const base = Deno.env.get("MEDIA_PUBLIC_BASE_URL")!.replace(/\/$/, "");
+  const safeKey = key.replace(/^\//, "");
+  return `${base}/${bucket}/${safeKey}`;
+}
+
+function S3_BUCKET_MESSAGE(): string {
+  return Deno.env.get("S3_MEDIA_BUCKET_MESSAGE")?.trim() || "message-media";
+}
 
 function getServiceClient(): SupabaseClient {
   const url = Deno.env.get("SUPABASE_URL");
@@ -220,13 +275,23 @@ async function fetchMetaMediaAndUpload(
     const blob = await mediaRes.blob();
     const ext = data.mime_type?.includes("ogg") ? "ogg" : data.mime_type?.includes("mpeg") ? "mp3" : "bin";
     const path = `${orgId}/${conversationId}/${crypto.randomUUID()}.${ext}`;
-    const { error } = await supabase.storage.from("message-media").upload(path, blob, {
-      contentType: data.mime_type ?? "audio/ogg",
+    const ct = data.mime_type ?? "audio/ogg";
+    const bin = new Uint8Array(await blob.arrayBuffer());
+    if (s3MediaConfigured()) {
+      try {
+        await s3PutObject(S3_BUCKET_MESSAGE(), path, bin, ct);
+      } catch {
+        return null;
+      }
+      return { url: publicUrlForS3Object(S3_BUCKET_MESSAGE(), path), mime_type: ct };
+    }
+    const { error } = await supabase.storage.from("message-media").upload(path, bin, {
+      contentType: ct,
       upsert: false,
     });
     if (error) return null;
     const { data: pub } = supabase.storage.from("message-media").getPublicUrl(path);
-    return { url: pub.publicUrl, mime_type: data.mime_type ?? "audio/ogg" };
+    return { url: pub.publicUrl, mime_type: ct };
   } catch {
     return null;
   }

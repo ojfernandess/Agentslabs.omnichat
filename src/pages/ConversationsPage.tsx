@@ -36,6 +36,7 @@ import { compressImageFileForUpload } from '@/lib/mediaClient';
 import { uploadMessageAttachment } from '@/lib/messageAttachmentUpload';
 import { useSelectedConversation } from '@/contexts/SelectedConversationContext';
 import { parseCsatSettings } from '@/lib/csatSettings';
+import { getFunctionUrl } from '@/lib/runtimeEnv';
 import {
   Search, Plus, Send, Paperclip, MoreVertical, User, Clock,
   CheckCircle2, AlertCircle, MessageSquare, Inbox, Star, RotateCcw,
@@ -844,8 +845,7 @@ const ConversationsPage: React.FC = () => {
         const { data: sessionData } = await supabase.auth.getSession();
         const jwt = sessionData.session?.access_token;
         if (!jwt) throw new Error('Sessão expirada');
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-        const res = await fetch(`${supabaseUrl}/functions/v1/send-csat-survey`, {
+        const res = await fetch(getFunctionUrl('send-csat-survey'), {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${jwt}`,
@@ -996,8 +996,7 @@ const ConversationsPage: React.FC = () => {
         toast.error('Sessão expirada');
         return;
       }
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-      const res = await fetch(`${supabaseUrl}/functions/v1/process-media`, {
+      const res = await fetch(getFunctionUrl('process-media'), {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${jwt}`,

@@ -9,6 +9,63 @@
  * Opcional: defina config.evolution.webhook_secret e use ?secret=... na URL.
  */
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { PutObjectCommand, S3Client } from "npm:@aws-sdk/client-s3@3.654.0";
+
+/** S3/MinIO — inline para deploy remoto. Manter em sync com _shared/s3-media.ts */
+function s3MediaConfigured(): boolean {
+  return Boolean(
+    Deno.env.get("S3_MEDIA_ENDPOINT")?.trim() &&
+      Deno.env.get("S3_MEDIA_ACCESS_KEY")?.trim() &&
+      Deno.env.get("S3_MEDIA_SECRET_KEY")?.trim() &&
+      Deno.env.get("MEDIA_PUBLIC_BASE_URL")?.trim(),
+  );
+}
+
+let _s3MediaClient: S3Client | null = null;
+
+function getS3MediaClient(): S3Client {
+  if (_s3MediaClient) return _s3MediaClient;
+  const endpoint = Deno.env.get("S3_MEDIA_ENDPOINT")!.trim();
+  const region = Deno.env.get("S3_MEDIA_REGION")?.trim() || "us-east-1";
+  const forcePathStyle = Deno.env.get("S3_MEDIA_FORCE_PATH_STYLE") !== "false";
+  _s3MediaClient = new S3Client({
+    region,
+    endpoint,
+    credentials: {
+      accessKeyId: Deno.env.get("S3_MEDIA_ACCESS_KEY")!.trim(),
+      secretAccessKey: Deno.env.get("S3_MEDIA_SECRET_KEY")!.trim(),
+    },
+    forcePathStyle,
+  });
+  return _s3MediaClient;
+}
+
+async function s3PutObject(
+  bucket: string,
+  key: string,
+  body: Uint8Array,
+  contentType: string,
+): Promise<void> {
+  const client = getS3MediaClient();
+  await client.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+    }),
+  );
+}
+
+function publicUrlForS3Object(bucket: string, key: string): string {
+  const base = Deno.env.get("MEDIA_PUBLIC_BASE_URL")!.replace(/\/$/, "");
+  const safeKey = key.replace(/^\//, "");
+  return `${base}/${bucket}/${safeKey}`;
+}
+
+function S3_BUCKET_MESSAGE(): string {
+  return Deno.env.get("S3_MEDIA_BUCKET_MESSAGE")?.trim() || "message-media";
+}
 
 function getServiceClient(): SupabaseClient {
   const url = Deno.env.get("SUPABASE_URL");
@@ -219,12 +276,29 @@ function normalizeEvolutionInbound(body: Record<string, unknown>): NormalizedInb
   return out;
 }
 
+function getMessageMediaPublicUrl(supabase: SupabaseClient, path: string): string {
+  if (s3MediaConfigured()) {
+    return publicUrlForS3Object(S3_BUCKET_MESSAGE(), path);
+  }
+  const { data: pub } = supabase.storage.from("message-media").getPublicUrl(path);
+  return pub.publicUrl;
+}
+
 async function uploadToStorageWithRetry(
   supabase: SupabaseClient,
   path: string,
   bin: Uint8Array,
   contentType: string,
 ): Promise<boolean> {
+  if (s3MediaConfigured()) {
+    try {
+      await s3PutObject(S3_BUCKET_MESSAGE(), path, bin, contentType);
+      return true;
+    } catch (e) {
+      console.error("[evolution-audio] S3 upload error", String(e));
+      return false;
+    }
+  }
   for (let attempt = 1; attempt <= 3; attempt++) {
     const { error } = await supabase.storage.from("message-media").upload(path, bin, {
       contentType,
@@ -255,8 +329,7 @@ async function uploadAudioBase64(
     const path = `${orgId}/${conversationId}/${crypto.randomUUID()}.${ext}`;
     const ct = mimetype ?? "audio/ogg";
     if (!(await uploadToStorageWithRetry(supabase, path, bin, ct))) return null;
-    const { data: pub } = supabase.storage.from("message-media").getPublicUrl(path);
-    return [{ url: pub.publicUrl, mime_type: ct }];
+    return [{ url: getMessageMediaPublicUrl(supabase, path), mime_type: ct }];
   } catch {
     return null;
   }
@@ -310,8 +383,7 @@ async function fetchEvolutionAudioAndUpload(
       const path = `${orgId}/${conversationId}/${crypto.randomUUID()}.${ext}`;
       const ct = mimetype ?? "audio/ogg";
       if (await uploadToStorageWithRetry(supabase, path, bin, ct)) {
-        const { data: pub } = supabase.storage.from("message-media").getPublicUrl(path);
-        return [{ url: pub.publicUrl, mime_type: ct }];
+        return [{ url: getMessageMediaPublicUrl(supabase, path), mime_type: ct }];
       }
       continue;
     } catch (e) {

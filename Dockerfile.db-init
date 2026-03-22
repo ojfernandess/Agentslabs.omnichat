@@ -1,0 +1,13 @@
+# Aplica migrações SQL ao Postgres (Supabase Cloud, self-hosted ou RDS)
+# Uso: docker run --rm -e DATABASE_URL="postgresql://..." agentslabs-db-init
+#
+# Nota: o schema auth.* e extensões do Supabase devem existir (use imagem oficial
+# ou supabase db push). Migrações deste projeto referenciam auth.users.
+
+FROM postgres:16-alpine
+RUN apk add --no-cache bash
+WORKDIR /app
+COPY supabase/migrations ./supabase/migrations
+COPY docker/entrypoint-db-init.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]

@@ -1,0 +1,15 @@
+# Exemplo: mesmo frontend com variáveis para backend Supabase self-hosted
+# Uso: docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.selfhosted.yml up -d --build
+#
+# Defina no .env na raiz (ou export):
+#   VITE_SUPABASE_URL=https://api.seudominio.com   # URL do Kong / API gateway
+#   VITE_SUPABASE_PUBLISHABLE_KEY=eyJ...          # anon key do projeto self-hosted
+#   VITE_DEPLOYMENT_MODE=selfhosted
+# Opcional se funções em host separado:
+#   VITE_SUPABASE_FUNCTIONS_URL=https://fn.seudominio.com
+
+services:
+  web:
+    build:
+      args:
+        VITE_DEPLOYMENT_MODE: ${VITE_DEPLOYMENT_MODE:-selfhosted}

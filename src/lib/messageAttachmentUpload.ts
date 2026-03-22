@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import { getUploadMediaUrl, useExternalMediaStorage } from '@/lib/runtimeEnv';
 
 const MAX_BYTES = 10 * 1024 * 1024;
 
@@ -28,7 +29,57 @@ export type UploadedAttachment = {
   file_name: string;
 };
 
-/** Upload para o bucket Supabase Storage (message-media). */
+/** Upload para S3/MinIO (Easypanel) via Edge Function `upload-media`. */
+async function uploadMessageAttachmentExternal(
+  organizationId: string,
+  conversationId: string,
+  file: File,
+): Promise<UploadedAttachment> {
+  const { data: sess } = await supabase.auth.getSession();
+  if (!sess.session) throw new Error('Sessão expirada. Inicie sessão novamente.');
+
+  const form = new FormData();
+  form.append('kind', 'message');
+  form.append('organization_id', organizationId);
+  form.append('conversation_id', conversationId);
+  form.append('file', file);
+
+  const apikey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
+  const res = await fetch(getUploadMediaUrl(), {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${sess.session.access_token}`,
+      ...(apikey ? { apikey } : {}),
+    },
+    body: form,
+  });
+
+  const body = (await res.json().catch(() => ({}))) as {
+    error?: string;
+    detail?: string;
+    url?: string;
+    path?: string;
+    mime_type?: string;
+    file_name?: string;
+  };
+
+  if (!res.ok) {
+    throw new Error(body.error ?? body.detail ?? res.statusText ?? 'Falha no upload');
+  }
+
+  if (!body.url || !body.path) {
+    throw new Error('Resposta inválida do servidor de mídia');
+  }
+
+  return {
+    url: body.url,
+    path: body.path,
+    mime_type: body.mime_type || file.type || 'application/octet-stream',
+    file_name: body.file_name || file.name,
+  };
+}
+
+/** Upload para o bucket Supabase Storage (message-media) ou S3/MinIO conforme `VITE_EXTERNAL_MEDIA_STORAGE`. */
 export async function uploadMessageAttachment(
   organizationId: string,
   conversationId: string,
@@ -36,6 +87,10 @@ export async function uploadMessageAttachment(
 ): Promise<UploadedAttachment> {
   const err = validateAttachmentFile(file);
   if (err) throw new Error(err);
+
+  if (useExternalMediaStorage()) {
+    return uploadMessageAttachmentExternal(organizationId, conversationId, file);
+  }
 
   const ext = file.name.includes('.') ? file.name.split('.').pop()!.slice(0, 8) : 'bin';
   const path = `${organizationId}/${conversationId}/${crypto.randomUUID()}.${ext}`;
@@ -59,7 +114,33 @@ export async function uploadMessageAttachment(
 
 const AVATAR_ALLOWED = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 
-/** Upload de avatar para inbox (widget). Bucket inbox-avatars. */
+async function uploadInboxAvatarExternal(organizationId: string, channelId: string, file: File): Promise<string> {
+  const { data: sess } = await supabase.auth.getSession();
+  if (!sess.session) throw new Error('Sessão expirada. Inicie sessão novamente.');
+
+  const form = new FormData();
+  form.append('kind', 'inbox_avatar');
+  form.append('organization_id', organizationId);
+  form.append('channel_id', channelId);
+  form.append('file', file);
+
+  const apikey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
+  const res = await fetch(getUploadMediaUrl(), {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${sess.session.access_token}`,
+      ...(apikey ? { apikey } : {}),
+    },
+    body: form,
+  });
+
+  const body = (await res.json().catch(() => ({}))) as { error?: string; url?: string };
+  if (!res.ok) throw new Error(body.error ?? res.statusText);
+  if (!body.url) throw new Error('Resposta inválida do servidor de mídia');
+  return body.url;
+}
+
+/** Upload de avatar para inbox (widget). Bucket inbox-avatars ou S3 conforme `VITE_EXTERNAL_MEDIA_STORAGE`. */
 export async function uploadInboxAvatar(
   organizationId: string,
   channelId: string,
@@ -69,6 +150,10 @@ export async function uploadInboxAvatar(
     throw new Error('Use imagem PNG, JPG, GIF ou WebP.');
   }
   if (file.size > 2 * 1024 * 1024) throw new Error('Máximo 2 MB.');
+
+  if (useExternalMediaStorage()) {
+    return uploadInboxAvatarExternal(organizationId, channelId, file);
+  }
 
   const ext = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase().slice(0, 4) : 'jpg';
   const extMap: Record<string, string> = { jpeg: 'jpg', jpg: 'jpg', png: 'png', gif: 'gif', webp: 'webp' };

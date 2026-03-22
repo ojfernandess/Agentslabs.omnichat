@@ -1,0 +1,49 @@
+# Stack sugerida para Easypanel / Docker Compose (mesmo servidor, estilo Chatwoot).
+#
+# Serviços:
+#   - web: SPA (Nginx) — Dockerfile na raiz ou deploy/Dockerfile
+#   - db-init: one-shot — aplica supabase/migrations (requer DATABASE_URL com Postgres compatível Supabase)
+#
+# As Edge Functions Deno não são substituídas por Node neste repositório: em modo "local"
+# deve usar uma das opções documentadas em docs/DEPLOYMENT_ARCHITECTURE.md (Supabase self-hosted,
+# edge-runtime, ou proxy para o mesmo URL pattern).
+#
+# Uso na raiz:
+#   docker compose -f deploy/docker-compose.easypanel.yml --env-file .env up -d --build
+#
+# Variáveis: ver .env.example e docs/DEPLOYMENT_ARCHITECTURE.md
+
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:?}
+        VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:?}
+        VITE_SUPABASE_FUNCTIONS_URL: ${VITE_SUPABASE_FUNCTIONS_URL:-}
+        VITE_DEPLOYMENT_MODE: ${VITE_DEPLOYMENT_MODE:-easypanel}
+        META_APP_ID: ${META_APP_ID:-}
+        VITE_PUBLIC_APP_URL: ${VITE_PUBLIC_APP_URL:-}
+        VITE_INTERNAL_HOOK_SECRET: ${VITE_INTERNAL_HOOK_SECRET:-}
+        VITE_EXTERNAL_MEDIA_STORAGE: ${VITE_EXTERNAL_MEDIA_STORAGE:-}
+        VITE_EXTERNAL_MEDIA_UPLOAD_URL: ${VITE_EXTERNAL_MEDIA_UPLOAD_URL:-}
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Executar uma vez após Postgres disponível (ou usar job no Easypanel)
+  db-init:
+    profiles:
+      - migrate
+    build:
+      context: ..
+      dockerfile: Dockerfile.db-init
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?}
+    restart: "no"

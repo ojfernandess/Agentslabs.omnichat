@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import { getFunctionUrl } from '@/lib/runtimeEnv';
 
 export type MetaOAuthChannelPayload = {
   waba_id: string;
@@ -23,8 +24,7 @@ export async function exchangeMetaOAuthCode(
     throw new Error('Sessão expirada. Entre novamente.');
   }
 
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-  const res = await fetch(`${supabaseUrl}/functions/v1/meta-oauth-exchange`, {
+  const res = await fetch(getFunctionUrl('meta-oauth-exchange'), {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${jwt}`,

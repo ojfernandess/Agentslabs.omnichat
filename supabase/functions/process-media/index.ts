@@ -4,6 +4,63 @@
  */
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { Image } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
+import { PutObjectCommand, S3Client } from "npm:@aws-sdk/client-s3@3.654.0";
+
+/** S3/MinIO — código inline (o bundle remoto não inclui ../_shared). Manter em sync com _shared/s3-media.ts */
+function s3MediaConfigured(): boolean {
+  return Boolean(
+    Deno.env.get("S3_MEDIA_ENDPOINT")?.trim() &&
+      Deno.env.get("S3_MEDIA_ACCESS_KEY")?.trim() &&
+      Deno.env.get("S3_MEDIA_SECRET_KEY")?.trim() &&
+      Deno.env.get("MEDIA_PUBLIC_BASE_URL")?.trim(),
+  );
+}
+
+let _s3MediaClient: S3Client | null = null;
+
+function getS3MediaClient(): S3Client {
+  if (_s3MediaClient) return _s3MediaClient;
+  const endpoint = Deno.env.get("S3_MEDIA_ENDPOINT")!.trim();
+  const region = Deno.env.get("S3_MEDIA_REGION")?.trim() || "us-east-1";
+  const forcePathStyle = Deno.env.get("S3_MEDIA_FORCE_PATH_STYLE") !== "false";
+  _s3MediaClient = new S3Client({
+    region,
+    endpoint,
+    credentials: {
+      accessKeyId: Deno.env.get("S3_MEDIA_ACCESS_KEY")!.trim(),
+      secretAccessKey: Deno.env.get("S3_MEDIA_SECRET_KEY")!.trim(),
+    },
+    forcePathStyle,
+  });
+  return _s3MediaClient;
+}
+
+async function s3PutObject(
+  bucket: string,
+  key: string,
+  body: Uint8Array,
+  contentType: string,
+): Promise<void> {
+  const client = getS3MediaClient();
+  await client.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+    }),
+  );
+}
+
+function publicUrlForS3Object(bucket: string, key: string): string {
+  const base = Deno.env.get("MEDIA_PUBLIC_BASE_URL")!.replace(/\/$/, "");
+  const safeKey = key.replace(/^\//, "");
+  return `${base}/${bucket}/${safeKey}`;
+}
+
+function S3_BUCKET_MESSAGE(): string {
+  return Deno.env.get("S3_MEDIA_BUCKET_MESSAGE")?.trim() || "message-media";
+}
 
 const cors: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -143,8 +200,35 @@ Deno.serve(async (req) => {
   const id = crypto.randomUUID();
   const base = `${orgId}/${id}`;
   const svc = getServiceClient();
+  const bucket = S3_BUCKET_MESSAGE();
+  const fullKey = `${base}_full.jpg`;
+  const thumbKey = `${base}_thumb.jpg`;
 
-  const { error: up1 } = await svc.storage.from("message-media").upload(`${base}_full.jpg`, compressed, {
+  if (s3MediaConfigured()) {
+    try {
+      await s3PutObject(bucket, fullKey, compressed, "image/jpeg");
+      await s3PutObject(bucket, thumbKey, thumbnail, "image/jpeg");
+    } catch (e) {
+      return new Response(JSON.stringify({ error: "Falha ao gravar imagem (S3)", detail: String(e) }), {
+        status: 500,
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+
+    return new Response(
+      JSON.stringify({
+        full_path: fullKey,
+        thumb_path: thumbKey,
+        full_url: publicUrlForS3Object(bucket, fullKey),
+        thumb_url: publicUrlForS3Object(bucket, thumbKey),
+        width: main.width,
+        height: main.height,
+      }),
+      { status: 200, headers: { ...cors, "Content-Type": "application/json" } },
+    );
+  }
+
+  const { error: up1 } = await svc.storage.from("message-media").upload(fullKey, compressed, {
     contentType: "image/jpeg",
     upsert: false,
   });
@@ -155,7 +239,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  const { error: up2 } = await svc.storage.from("message-media").upload(`${base}_thumb.jpg`, thumbnail, {
+  const { error: up2 } = await svc.storage.from("message-media").upload(thumbKey, thumbnail, {
     contentType: "image/jpeg",
     upsert: false,
   });
@@ -167,14 +251,14 @@ Deno.serve(async (req) => {
   }
 
   const pub = Deno.env.get("SUPABASE_URL")!.replace(/\/$/, "");
-  const bucket = "message-media";
+  const sbBucket = "message-media";
 
   return new Response(
     JSON.stringify({
-      full_path: `${base}_full.jpg`,
-      thumb_path: `${base}_thumb.jpg`,
-      full_url: `${pub}/storage/v1/object/public/${bucket}/${base}_full.jpg`,
-      thumb_url: `${pub}/storage/v1/object/public/${bucket}/${base}_thumb.jpg`,
+      full_path: fullKey,
+      thumb_path: thumbKey,
+      full_url: `${pub}/storage/v1/object/public/${sbBucket}/${fullKey}`,
+      thumb_url: `${pub}/storage/v1/object/public/${sbBucket}/${thumbKey}`,
       width: main.width,
       height: main.height,
     }),

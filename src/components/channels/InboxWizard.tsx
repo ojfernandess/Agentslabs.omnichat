@@ -27,6 +27,7 @@ import { toast } from 'sonner';
 import { Copy, Check, ChevronLeft, ChevronRight, Phone } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getMetaAppId, startMetaBusinessOAuth } from '@/lib/metaOAuth';
+import { getFunctionsBaseUrl } from '@/lib/runtimeEnv';
 
 type ChannelType = Database['public']['Enums']['channel_type'];
 
@@ -261,9 +262,11 @@ const InboxWizard: React.FC<Props> = ({
   }, []);
 
   const edgeFunctionBase = useMemo(() => {
-    const u = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-    if (u && u.length > 0) return `${u.replace(/\/$/, '')}/functions/v1`;
-    return '';
+    try {
+      return getFunctionsBaseUrl();
+    } catch {
+      return '';
+    }
   }, []);
 
   const dbType = provider?.dbType;
@@ -966,7 +969,7 @@ const InboxWizard: React.FC<Props> = ({
       ? `${edgeFunctionBase}/meta-whatsapp-webhook?channel_id=${created.id}`
       : `${baseUrl}/webhooks/whatsapp/${created.id}`;
     const tgSetUrl = edgeFunctionBase ? `${edgeFunctionBase}/telegram-set-webhook` : '';
-    const apiUrl = edgeFunctionBase || ((import.meta.env.VITE_SUPABASE_URL as string)?.replace(/\/$/, '') + '/functions/v1');
+    const apiUrl = edgeFunctionBase;
     const widgetSnippet = apiUrl
       ? `<script src="${baseUrl}/widget.js" data-inbox-token="${created.public_token}" data-api-url="${apiUrl}" defer></script>`
       : `<script src="${baseUrl}/widget.js" data-inbox-token="${created.public_token}"></script>`;

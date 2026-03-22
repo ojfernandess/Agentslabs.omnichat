@@ -22,6 +22,7 @@ import {
   WEBHOOK_EVENT_GROUPS,
   ALL_WEBHOOK_EVENT_IDS,
 } from '@/lib/webhookEvents';
+import { getFunctionUrl } from '@/lib/runtimeEnv';
 import {
   MISSING_TABLE_STORAGE_KEYS,
   isMissingRestTableError,
@@ -166,14 +167,13 @@ const WebhooksPage: React.FC = () => {
   });
 
   const testWebhook = async (id: string) => {
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
     const { data: sessionData } = await supabase.auth.getSession();
     const jwt = sessionData.session?.access_token;
     if (!jwt) {
       toast.error('Sessão inválida');
       return;
     }
-    const res = await fetch(`${supabaseUrl}/functions/v1/test-webhook`, {
+    const res = await fetch(getFunctionUrl('test-webhook'), {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${jwt}`,

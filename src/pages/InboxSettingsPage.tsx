@@ -38,6 +38,7 @@ import { toast } from 'sonner';
 import { DEFAULT_CSAT_MESSAGE } from '@/lib/csatSettings';
 import { uploadInboxAvatar } from '@/lib/messageAttachmentUpload';
 import { cn } from '@/lib/utils';
+import { getFunctionsBaseUrl } from '@/lib/runtimeEnv';
 
 const channelLabels: Record<string, string> = {
   whatsapp: 'WhatsApp',
@@ -601,8 +602,12 @@ const InboxSettingsPage: React.FC = () => {
     const appUrl =
       (import.meta.env.VITE_PUBLIC_APP_URL as string)?.replace(/\/$/, '') ||
       (typeof window !== 'undefined' ? window.location.origin : '');
-    const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string)?.replace(/\/$/, '');
-    const apiUrl = supabaseUrl ? `${supabaseUrl}/functions/v1` : '';
+    let apiUrl = '';
+    try {
+      apiUrl = getFunctionsBaseUrl();
+    } catch {
+      apiUrl = '';
+    }
     if (!channel?.public_token || !appUrl || !apiUrl) return '';
     return `<script src="${appUrl}/widget.js" data-inbox-token="${channel.public_token}" data-api-url="${apiUrl}" defer></script>`;
   }, [channel?.public_token]);

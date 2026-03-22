@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Routes, Route, NavLink } from 'react-router-dom';
 import { useIsSuperAdmin } from '@/hooks/useIsSuperAdmin';
+import { getFunctionUrl } from '@/lib/runtimeEnv';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -290,7 +291,7 @@ function PlatformAppsTab() {
   const [createdToken, setCreatedToken] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [docsOpen, setDocsOpen] = useState(false);
-  const baseUrl = (import.meta.env.VITE_SUPABASE_URL as string)?.replace(/\/$/, '') + '/functions/v1/platform-api';
+  const baseUrl = getFunctionUrl('platform-api');
 
   const { data: apps = [] } = useQuery({
     queryKey: ['platform-apps'],

@@ -1,19 +1,11 @@
 node_modules
 dist
 .git
-.github
-# Frontend não precisa do stack Supabase na imagem (migrações vão pelo CI ou CLI)
-supabase/
-e2e
-playwright-report
-test-results
-*.log
 .env
 .env.*
 !.env.example
 coverage
+*.md
+!docs/DEPLOYMENT_ARCHITECTURE.md
 .vscode
-.idea
-README.md
-DOCKER.md
-mcps
+.cursor

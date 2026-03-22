@@ -1,25 +1,32 @@
-# Migrações no Supabase (remoto) + imagem Docker no GHCR.
+# Build da imagem (GHCR) + migrações Supabase opcionais.
+# Uso típico: Easypanel puxa ghcr.io/<org>/<repo>:latest ou :sha.
 #
 # Secrets (Settings → Secrets and variables → Actions):
-#   Obrigatórios para migrações:
-#     SUPABASE_ACCESS_TOKEN   https://supabase.com/dashboard/account/tokens
-#     SUPABASE_PROJECT_REF    Settings → General → Reference ID
-#   Opcional se o CLI pedir password ao linkar:
-#     SUPABASE_DB_PASSWORD    Settings → Database
-#
-#   Obrigatórios para build Vite (embute no bundle):
+#   Build Vite (recomendado):
 #     VITE_SUPABASE_URL
 #     VITE_SUPABASE_PUBLISHABLE_KEY
-#
-#   Opcionais (Meta / URLs públicas):
+#   Opcionais (alinhados com deploy/docker-compose.easypanel.yml / Dockerfile):
+#     VITE_SUPABASE_FUNCTIONS_URL
+#     VITE_DEPLOYMENT_MODE          (ex.: easypanel)
 #     META_APP_ID, VITE_PUBLIC_APP_URL, VITE_INTERNAL_HOOK_SECRET
+#     VITE_EXTERNAL_MEDIA_STORAGE, VITE_EXTERNAL_MEDIA_UPLOAD_URL
+#
+# Migrações (job migrate — pode saltar no workflow manual):
+#     SUPABASE_ACCESS_TOKEN, SUPABASE_PROJECT_REF
+#     SUPABASE_DB_PASSWORD (opcional, se o link pedir)
 
-name: Docker e migrações Supabase
+name: Docker (GHCR) e migrações Supabase
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      skip_migrate:
+        description: "Apenas build/push da imagem (sem supabase db push)"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: docker-deploy-${{ github.ref }}
@@ -36,6 +43,7 @@ jobs:
   migrate:
     name: Migrações (supabase db push)
     runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.skip_migrate != true }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -64,9 +72,10 @@ jobs:
           supabase db push
 
   docker:
-    name: Build e push imagem
+    name: Build e push imagem (Dockerfile raiz)
     runs-on: ubuntu-latest
     needs: migrate
+    if: ${{ always() && (needs.migrate.result == 'success' || needs.migrate.result == 'skipped') }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -91,12 +100,17 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ./Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             VITE_SUPABASE_URL=${{ secrets.VITE_SUPABASE_URL }}
             VITE_SUPABASE_PUBLISHABLE_KEY=${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+            VITE_SUPABASE_FUNCTIONS_URL=${{ secrets.VITE_SUPABASE_FUNCTIONS_URL }}
+            VITE_DEPLOYMENT_MODE=${{ secrets.VITE_DEPLOYMENT_MODE }}
             META_APP_ID=${{ secrets.META_APP_ID }}
             VITE_PUBLIC_APP_URL=${{ secrets.VITE_PUBLIC_APP_URL }}
             VITE_INTERNAL_HOOK_SECRET=${{ secrets.VITE_INTERNAL_HOOK_SECRET }}
+            VITE_EXTERNAL_MEDIA_STORAGE=${{ secrets.VITE_EXTERNAL_MEDIA_STORAGE }}
+            VITE_EXTERNAL_MEDIA_UPLOAD_URL=${{ secrets.VITE_EXTERNAL_MEDIA_UPLOAD_URL }}
