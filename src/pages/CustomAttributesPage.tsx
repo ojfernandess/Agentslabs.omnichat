@@ -35,7 +35,8 @@ const CustomAttributesPage: React.FC = () => {
     entity_type: 'conversation' as 'conversation' | 'contact',
     attribute_key: '',
     label: '',
-    value_type: 'text' as 'text' | 'number' | 'boolean' | 'list',
+    description: '',
+    value_type: 'text' as 'text' | 'number' | 'boolean' | 'list' | 'link' | 'date',
     list_options: '',
   });
 
@@ -72,6 +73,7 @@ const CustomAttributesPage: React.FC = () => {
           entity_type: form.entity_type,
           attribute_key: form.attribute_key.trim().toLowerCase().replace(/\s+/g, '_'),
           label: form.label.trim(),
+          description: form.description.trim() || null,
           value_type: form.value_type,
           list_options: list_options as Row['list_options'],
         })
@@ -92,6 +94,7 @@ const CustomAttributesPage: React.FC = () => {
         entity_type: 'conversation',
         attribute_key: '',
         label: '',
+        description: '',
         value_type: 'text',
         list_options: '',
       });
@@ -152,7 +155,7 @@ const CustomAttributesPage: React.FC = () => {
                   className="space-y-3"
                 >
                   <div className="space-y-1">
-                    <Label>Entidade</Label>
+                    <Label>Applies to</Label>
                     <Select
                       value={form.entity_type}
                       onValueChange={(v) =>
@@ -163,30 +166,39 @@ const CustomAttributesPage: React.FC = () => {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="conversation">Conversa</SelectItem>
-                        <SelectItem value="contact">Contacto</SelectItem>
+                        <SelectItem value="conversation">Conversation</SelectItem>
+                        <SelectItem value="contact">Contact</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-1">
-                    <Label>Chave interna</Label>
-                    <Input
-                      value={form.attribute_key}
-                      onChange={(e) => setForm({ ...form, attribute_key: e.target.value })}
-                      required
-                      placeholder="ex: pedido_id"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label>Rótulo</Label>
+                    <Label>Display name</Label>
                     <Input
                       value={form.label}
                       onChange={(e) => setForm({ ...form, label: e.target.value })}
                       required
+                      placeholder="e.g. Order ID"
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label>Tipo</Label>
+                    <Label>Key</Label>
+                    <Input
+                      value={form.attribute_key}
+                      onChange={(e) => setForm({ ...form, attribute_key: e.target.value })}
+                      required
+                      placeholder="e.g. order_id"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Description</Label>
+                    <Input
+                      value={form.description}
+                      onChange={(e) => setForm({ ...form, description: e.target.value })}
+                      placeholder="Optional"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Type</Label>
                     <Select
                       value={form.value_type}
                       onValueChange={(v) =>
@@ -197,10 +209,12 @@ const CustomAttributesPage: React.FC = () => {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="text">Texto</SelectItem>
-                        <SelectItem value="number">Número</SelectItem>
-                        <SelectItem value="boolean">Sim/Não</SelectItem>
-                        <SelectItem value="list">Lista (JSON)</SelectItem>
+                        <SelectItem value="text">Text</SelectItem>
+                        <SelectItem value="number">Number</SelectItem>
+                        <SelectItem value="link">Link</SelectItem>
+                        <SelectItem value="date">Date</SelectItem>
+                        <SelectItem value="list">List</SelectItem>
+                        <SelectItem value="boolean">Checkbox</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -234,6 +248,9 @@ const CustomAttributesPage: React.FC = () => {
                 <div>
                   <span className="font-mono text-primary">{r.attribute_key}</span>
                   <span className="text-muted-foreground"> — {r.label}</span>
+                  {'description' in r && r.description && (
+                    <span className="ml-2 text-xs text-muted-foreground">({r.description})</span>
+                  )}
                   <span className="ml-2 text-xs uppercase text-muted-foreground">
                     {r.entity_type} / {r.value_type}
                   </span>

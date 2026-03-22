@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { NavLink } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
@@ -14,7 +15,6 @@ import {
   BookOpen,
   Settings,
   ChevronDown,
-  LogOut,
   Users,
   UsersRound,
   Hash,
@@ -30,10 +30,16 @@ import {
   Clock,
   GitBranch,
   Building2,
+  User,
   UserCog,
   Lock,
 } from 'lucide-react';
 import OperationalNotificationsBell from '@/components/layout/OperationalNotificationsBell';
+import UserProfileDropdown from '@/components/layout/UserProfileDropdown';
+import { useIsSuperAdmin } from '@/hooks/useIsSuperAdmin';
+import { useMailboxRealtime } from '@/hooks/useMailboxRealtime';
+import { useNotificationSound } from '@/hooks/useNotificationSound';
+import { useSelectedConversation } from '@/contexts/SelectedConversationContext';
 import { APP_LOGO_SRC, APP_NAME } from '@/constants/branding';
 import {
   DropdownMenu,
@@ -56,6 +62,7 @@ const mainNavItems = [
 
 const settingsNavItems = [
   { to: '/settings/account', icon: Building2, label: 'Conta' },
+  { to: '/settings/profile', icon: User, label: 'Configurações do perfil' },
   { to: '/settings/agents', icon: Users, label: 'Agentes' },
   { to: '/settings/teams', icon: UsersRound, label: 'Times' },
   { to: '/settings/inboxes', icon: Inbox, label: 'Caixas de entrada' },
@@ -84,8 +91,20 @@ const linkClass = (isActive: boolean) =>
 const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { signOut, user } = useAuth();
   const { currentOrg, organizations, setCurrentOrg, currentMember } = useOrg();
+  const queryClient = useQueryClient();
+  const { selectedConversationId } = useSelectedConversation();
+  const { play: playNotificationSound } = useNotificationSound();
+
+  useMailboxRealtime(currentOrg?.id, selectedConversationId, {
+    onNewMessage: (conversationId) => {
+      if (conversationId !== selectedConversationId || !document.hasFocus()) {
+        playNotificationSound();
+      }
+    },
+  });
   const showOps =
     !!currentMember && ['owner', 'admin', 'supervisor'].includes(currentMember.role);
+  const isSuperAdmin = useIsSuperAdmin();
 
   const { data: inboxUnread = 0 } = useQuery({
     queryKey: ['inbox-unread-count', currentOrg?.id],
@@ -214,31 +233,22 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         </nav>
 
         <div className="border-t border-sidebar-border px-2 lg:px-3 py-3 space-y-2">
-          <div className="hidden lg:flex items-center gap-2 min-w-0 px-1">
-            <div className="relative shrink-0">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-sidebar-accent text-xs font-bold text-sidebar-accent-foreground">
-                {initials}
-              </div>
-              <span
-                className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-sidebar"
-                title="Online"
+          <div className="flex items-center gap-1">
+            <div className="flex-1 min-w-0">
+              <UserProfileDropdown
+                displayName={displayName}
+                email={email}
+                initials={initials}
+                isSuperAdmin={isSuperAdmin}
               />
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-sidebar-foreground truncate leading-tight">{displayName}</p>
-              <p className="text-[11px] text-sidebar-muted truncate">{email}</p>
+            <div className="shrink-0">
+              <OperationalNotificationsBell
+                organizationId={currentOrg?.id}
+                enabled={showOps}
+                inboxUnread={inboxUnread}
+              />
             </div>
-          </div>
-          <div className="flex items-center gap-1">
-            <OperationalNotificationsBell organizationId={currentOrg?.id} enabled={showOps} />
-            <button
-              type="button"
-              onClick={signOut}
-              className="flex flex-1 items-center gap-3 rounded-lg px-3 py-2 text-sm text-sidebar-muted hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors"
-            >
-              <LogOut className="h-4 w-4 shrink-0" />
-              <span className="hidden lg:block">Sair</span>
-            </button>
           </div>
         </div>
       </aside>

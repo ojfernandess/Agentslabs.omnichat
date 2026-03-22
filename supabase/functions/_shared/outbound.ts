@@ -18,7 +18,11 @@ export async function enqueueOutboundForEvent(
     return;
   }
 
-  const matched = (hooks ?? []).filter((h) => (h.events as string[] | null)?.includes(eventName));
+  const matched = (hooks ?? []).filter((h) => {
+    const evts = h.events as string[] | null;
+    if (!evts?.length) return false;
+    return evts.includes("*") || evts.includes(eventName);
+  });
   if (!matched.length) return;
 
   const deliveryRows = matched.map((h) => ({

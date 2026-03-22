@@ -40,16 +40,16 @@ Deno.serve(async (req) => {
 
   const token = authHeader.slice(7);
   const supabase = getServiceClient();
+  const internalSecret = Deno.env.get("INTERNAL_HOOK_SECRET");
+  const isInternal = internalSecret && token === internalSecret;
 
-  const { data: { user }, error: userErr } = await supabase.auth.getUser(token);
-  if (userErr || !user) {
-    return new Response(JSON.stringify({ error: "Sessão inválida" }), {
-      status: 401,
-      headers: { ...cors, "Content-Type": "application/json" },
-    });
-  }
-
-  let body: { conversation_id?: string; content?: string };
+  let body: {
+    conversation_id?: string;
+    content?: string;
+    content_type?: string;
+    attachment_url?: string;
+    template?: { name: string; language?: string; body_parameters?: string[] };
+  };
   try {
     body = await req.json();
   } catch {
@@ -59,17 +59,63 @@ Deno.serve(async (req) => {
     });
   }
 
-  const { conversation_id, content } = body;
-  if (!conversation_id || typeof content !== "string") {
-    return new Response(JSON.stringify({ error: "conversation_id e content são obrigatórios" }), {
+  const { conversation_id, content, content_type, attachment_url, template } = body;
+
+  if (!isInternal) {
+    const { data: { user }, error: userErr } = await supabase.auth.getUser(token);
+    if (userErr || !user) {
+      return new Response(JSON.stringify({ error: "Sessão inválida" }), {
+        status: 401,
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+    const { data: convo } = await supabase
+      .from("conversations")
+      .select("organization_id")
+      .eq("id", conversation_id)
+      .maybeSingle();
+    if (!convo) {
+      return new Response(JSON.stringify({ error: "Conversa não encontrada" }), {
+        status: 404,
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+    const { data: member } = await supabase
+      .from("organization_members")
+      .select("id")
+      .eq("organization_id", convo.organization_id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (!member) {
+      return new Response(JSON.stringify({ error: "Sem acesso a esta organização" }), {
+        status: 403,
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+  }
+  if (!conversation_id) {
+    return new Response(JSON.stringify({ error: "conversation_id é obrigatório" }), {
       status: 400,
       headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
-  const trimmed = content.trim();
-  if (!trimmed) {
-    return new Response(JSON.stringify({ error: "content não pode ser vazio" }), {
+  const isText = content_type !== "audio" && content_type !== "template";
+  const trimmed = typeof content === "string" ? content.trim() : "";
+  if (isText && !trimmed && !attachment_url && !template) {
+    return new Response(JSON.stringify({ error: "content, attachment_url ou template são obrigatórios" }), {
+      status: 400,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
+  if (content_type === "audio" && !attachment_url) {
+    return new Response(JSON.stringify({ error: "attachment_url é obrigatório para áudio" }), {
+      status: 400,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
+  if (content_type === "template" && !template?.name) {
+    return new Response(JSON.stringify({ error: "template.name é obrigatório" }), {
       status: 400,
       headers: { ...cors, "Content-Type": "application/json" },
     });
@@ -88,18 +134,20 @@ Deno.serve(async (req) => {
     });
   }
 
-  const { data: member } = await supabase
-    .from("organization_members")
-    .select("id")
-    .eq("organization_id", convo.organization_id)
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (!member) {
-    return new Response(JSON.stringify({ error: "Sem acesso a esta organização" }), {
-      status: 403,
-      headers: { ...cors, "Content-Type": "application/json" },
-    });
+  if (!isInternal) {
+    const { data: { user } } = await supabase.auth.getUser(token);
+    const { data: member } = await supabase
+      .from("organization_members")
+      .select("id")
+      .eq("organization_id", convo.organization_id)
+      .eq("user_id", user!.id)
+      .maybeSingle();
+    if (!member) {
+      return new Response(JSON.stringify({ error: "Sem acesso a esta organização" }), {
+        status: 403,
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
   }
 
   const { data: channel, error: chErr } = await supabase
@@ -145,17 +193,21 @@ Deno.serve(async (req) => {
   }
 
   const sendWhatsAppUrl = `${baseUrl}/functions/v1/send-whatsapp`;
+  const payload: Record<string, unknown> = {
+    channel_id: channel.id,
+    to: contact.phone,
+    text: trimmed || undefined,
+    content_type: content_type ?? "text",
+    attachment_url: attachment_url ?? undefined,
+    template: template ?? undefined,
+  };
   const res = await fetch(sendWhatsAppUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${secret}`,
     },
-    body: JSON.stringify({
-      channel_id: channel.id,
-      to: contact.phone,
-      text: trimmed,
-    }),
+    body: JSON.stringify(payload),
   });
 
   const resJson = await res.json().catch(() => ({}));

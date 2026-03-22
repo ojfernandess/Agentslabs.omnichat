@@ -201,6 +201,37 @@ async function handleStatuses(
   }
 }
 
+async function fetchMetaMediaAndUpload(
+  accessToken: string,
+  mediaId: string,
+  supabase: SupabaseClient,
+  orgId: string,
+  conversationId: string,
+): Promise<{ url: string; mime_type: string } | null> {
+  try {
+    const version = Deno.env.get("META_GRAPH_VERSION") ?? "v21.0";
+    const res = await fetch(`https://graph.facebook.com/${version}/${mediaId}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const data = (await res.json()) as { url?: string; mime_type?: string; error?: unknown };
+    if (!res.ok || !data.url) return null;
+    const mediaRes = await fetch(data.url);
+    if (!mediaRes.ok) return null;
+    const blob = await mediaRes.blob();
+    const ext = data.mime_type?.includes("ogg") ? "ogg" : data.mime_type?.includes("mpeg") ? "mp3" : "bin";
+    const path = `${orgId}/${conversationId}/${crypto.randomUUID()}.${ext}`;
+    const { error } = await supabase.storage.from("message-media").upload(path, blob, {
+      contentType: data.mime_type ?? "audio/ogg",
+      upsert: false,
+    });
+    if (error) return null;
+    const { data: pub } = supabase.storage.from("message-media").getPublicUrl(path);
+    return { url: pub.publicUrl, mime_type: data.mime_type ?? "audio/ogg" };
+  } catch {
+    return null;
+  }
+}
+
 async function handleInboundMessages(
   supabase: SupabaseClient,
   channel: ChannelRow,
@@ -215,12 +246,27 @@ async function handleInboundMessages(
       ? (contacts[0].profile as { name?: string }).name
       : undefined;
 
+  const config = (channel.config ?? {}) as Record<string, unknown>;
+  const meta = (config.meta ?? {}) as Record<string, unknown>;
+  const accessToken = String(meta.access_token ?? meta.accessToken ?? "");
+
   for (const msg of messages) {
     const from = String(msg.from ?? "");
-    const textBody =
-      msg.type === "text" && msg.text && typeof msg.text === "object"
-        ? String((msg.text as { body?: string }).body ?? "")
-        : "";
+    let textBody = "";
+    let contentType = "text";
+    const audioMediaId = msg.type === "audio" && msg.audio && typeof msg.audio === "object"
+      ? String((msg.audio as { id?: string }).id ?? "")
+      : "";
+
+    if (msg.type === "text" && msg.text && typeof msg.text === "object") {
+      textBody = String((msg.text as { body?: string }).body ?? "");
+    } else if (msg.type === "audio") {
+      textBody = "🎤 Áudio";
+      contentType = "audio";
+    } else {
+      textBody = `[${msg.type ?? "mensagem"}]`;
+    }
+
     const mid = String(msg.id ?? "");
     const phone = from.startsWith("+") ? from : `+${from}`;
 
@@ -262,7 +308,7 @@ async function handleInboundMessages(
 
     if (!conversationId) {
       const trimmed = textBody.trim();
-      const isCsatDigit = /^[1-5]$/.test(trimmed);
+      const isCsatDigit = contentType === "text" && /^[1-5]$/.test(trimmed);
       if (isCsatDigit) {
         const { data: pend } = await supabase
           .from("conversations")
@@ -401,7 +447,7 @@ async function handleInboundMessages(
       timestamp: new Date().toISOString(),
       id: msgRow!.id,
       message_type: "incoming",
-      content_type: "text",
+      content_type: contentType,
       content: textBody,
       conversation: {
         id: conversationId,

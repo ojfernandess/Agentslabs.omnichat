@@ -34,6 +34,8 @@ export const PRIORITY_LABELS: Record<ConversationPriority, string> = {
 export const FILTER_TABS = [
   { id: 'all' as const, label: 'Todas' },
   { id: 'open' as const, label: 'Abertas' },
+  { id: 'mine' as const, label: 'Minhas' },
+  { id: 'unassigned' as const, label: 'Não atribuídas' },
   { id: 'pending' as const, label: 'Pendentes' },
   { id: 'snoozed' as const, label: 'Adiadas' },
   { id: 'resolved' as const, label: 'Resolvidas' },

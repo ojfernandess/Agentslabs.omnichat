@@ -13,7 +13,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "functions:serve": "supabase functions serve",
-    "functions:deploy": "supabase functions deploy"
+    "functions:deploy": "supabase functions deploy",
+    "db:migrate": "supabase db push",
+    "db:reset": "supabase db reset"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

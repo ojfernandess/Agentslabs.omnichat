@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ThemeProvider } from "next-themes";
 import { BrowserRouter, Route, Routes, Navigate, useLocation } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { OrgProvider, useOrg } from "@/contexts/OrgContext";
+import { SelectedConversationProvider } from "@/contexts/SelectedConversationContext";
 import AppLayout from "@/components/layout/AppLayout";
 import AuthPage from "@/pages/AuthPage";
 import OnboardingPage from "@/pages/OnboardingPage";
@@ -33,6 +35,8 @@ import RolePermissionsPage from "@/pages/RolePermissionsPage";
 import SlaPoliciesPage from "@/pages/SlaPoliciesPage";
 import WorkflowSettingsPage from "@/pages/WorkflowSettingsPage";
 import SecuritySettingsPage from "@/pages/SecuritySettingsPage";
+import ProfileSettingsPage from "@/pages/ProfileSettingsPage";
+import SuperAdminPage from "@/pages/SuperAdminPage";
 import WidgetChatPage from "@/pages/WidgetChatPage";
 
 const queryClient = new QueryClient({
@@ -69,8 +73,9 @@ const AppRoutes = () => {
       <Route
         path="*"
         element={
-          <AppLayout>
-            <Routes>
+          <SelectedConversationProvider>
+            <AppLayout>
+              <Routes>
               <Route path="/" element={<Navigate to="/inbox" replace />} />
               <Route path="/dashboard" element={<Navigate to="/inbox" replace />} />
               <Route path="/inbox" element={<DashboardPage />} />
@@ -82,6 +87,7 @@ const AppRoutes = () => {
               <Route path="/campaigns" element={<CampaignsPage />} />
               <Route path="/help-center" element={<HelpCenterAdminPage />} />
               <Route path="/settings" element={<Navigate to="/settings/account" replace />} />
+              <Route path="/settings/profile" element={<ProfileSettingsPage />} />
               <Route path="/settings/account" element={<SettingsPage />} />
               <Route path="/settings/bots" element={<SettingsPage />} />
               <Route path="/settings/webhooks" element={<SettingsPage />} />
@@ -104,9 +110,11 @@ const AppRoutes = () => {
               <Route path="/channels" element={<ChannelsPage />} />
               <Route path="/labels" element={<LabelsPage />} />
               <Route path="/webhooks" element={<WebhooksPage />} />
+              <Route path="/super-admin/*" element={<SuperAdminPage />} />
               <Route path="*" element={<NotFound />} />
-            </Routes>
-          </AppLayout>
+              </Routes>
+            </AppLayout>
+          </SelectedConversationProvider>
         }
       />
     </Routes>
@@ -115,10 +123,11 @@ const AppRoutes = () => {
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
         <AuthProvider>
           <OrgProvider>
             <AppRoutes />
@@ -126,6 +135,7 @@ const App = () => (
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
+    </ThemeProvider>
   </QueryClientProvider>
 );
 

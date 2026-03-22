@@ -50,7 +50,14 @@ Deno.serve(async (req) => {
     });
   }
 
-  let body: { channel_id?: string; to?: string; text?: string };
+  let body: {
+    channel_id?: string;
+    to?: string;
+    text?: string;
+    content_type?: string;
+    attachment_url?: string;
+    template?: { name: string; language?: string; body_parameters?: string[] };
+  };
   try {
     body = await req.json();
   } catch {
@@ -60,9 +67,18 @@ Deno.serve(async (req) => {
     });
   }
 
-  const { channel_id, to, text } = body;
-  if (!channel_id || !to || !text) {
-    return new Response(JSON.stringify({ error: "channel_id, to e text são obrigatórios" }), {
+  const { channel_id, to, text, content_type, attachment_url, template } = body;
+  if (!channel_id || !to) {
+    return new Response(JSON.stringify({ error: "channel_id e to são obrigatórios" }), {
+      status: 400,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
+  const hasText = text && text.trim();
+  const hasAudio = content_type === "audio" && attachment_url;
+  const hasTemplate = content_type === "template" && template?.name;
+  if (!hasText && !hasAudio && !hasTemplate) {
+    return new Response(JSON.stringify({ error: "text, attachment_url (áudio) ou template são obrigatórios" }), {
       status: 400,
       headers: { ...cors, "Content-Type": "application/json" },
     });
@@ -106,6 +122,37 @@ Deno.serve(async (req) => {
         { status: 400, headers: { ...cors, "Content-Type": "application/json" } },
       );
     }
+    if (hasAudio) {
+      const sendUrl = `${baseUrl}/message/sendWhatsAppAudio/${encodeURIComponent(instanceName)}`;
+      const res = await fetch(sendUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: apiKey,
+        },
+        body: JSON.stringify({
+          number: waTo,
+          audioMessage: { audio: attachment_url },
+        }),
+      });
+      const resJson = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return new Response(JSON.stringify({ error: "Evolution API (áudio)", detail: resJson }), {
+          status: 502,
+          headers: { ...cors, "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ ok: true, evolution: resJson }), {
+        status: 200,
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+    if (hasTemplate) {
+      return new Response(
+        JSON.stringify({ error: "Templates são suportados apenas no WhatsApp Cloud API (Meta). Use um canal configurado com Meta." }),
+        { status: 400, headers: { ...cors, "Content-Type": "application/json" } },
+      );
+    }
     const sendUrl = `${baseUrl}/message/sendText/${encodeURIComponent(instanceName)}`;
     const res = await fetch(sendUrl, {
       method: "POST",
@@ -115,7 +162,7 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         number: waTo,
-        text,
+        text: text!.trim(),
       }),
     });
     const resJson = await res.json().catch(() => ({}));
@@ -148,18 +195,50 @@ Deno.serve(async (req) => {
   const version = Deno.env.get("META_GRAPH_VERSION") ?? "v21.0";
   const graphUrl = `https://graph.facebook.com/${version}/${phoneNumberId}/messages`;
 
+  let graphBody: Record<string, unknown>;
+  if (hasTemplate) {
+    const lang = (template!.language ?? "en").trim();
+    const components: Array<Record<string, unknown>> = [];
+    const bodyParams = template!.body_parameters ?? [];
+    if (bodyParams.length > 0) {
+      components.push({
+        type: "body",
+        parameters: bodyParams.map((p) => ({ type: "text", text: p })),
+      });
+    }
+    graphBody = {
+      messaging_product: "whatsapp",
+      to: waTo,
+      type: "template",
+      template: {
+        name: template!.name.trim(),
+        language: { code: lang },
+        ...(components.length > 0 && { components }),
+      },
+    };
+  } else if (hasAudio) {
+    graphBody = {
+      messaging_product: "whatsapp",
+      to: waTo,
+      type: "audio",
+      audio: { link: attachment_url },
+    };
+  } else {
+    graphBody = {
+      messaging_product: "whatsapp",
+      to: waTo,
+      type: "text",
+      text: { body: (text ?? "").trim() },
+    };
+  }
+
   const res = await fetch(graphUrl, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      messaging_product: "whatsapp",
-      to: waTo,
-      type: "text",
-      text: { body: text },
-    }),
+    body: JSON.stringify(graphBody),
   });
 
   const resJson = await res.json().catch(() => ({}));

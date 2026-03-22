@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import type { RealtimeChannel } from '@supabase/supabase-js';
@@ -9,9 +9,12 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
  */
 export function useMailboxRealtime(
   organizationId: string | undefined,
-  selectedConversationId: string | null
+  selectedConversationId: string | null,
+  options?: { onNewMessage?: (conversationId: string) => void }
 ) {
   const queryClient = useQueryClient();
+  const onNewMessageRef = useRef(options?.onNewMessage);
+  onNewMessageRef.current = options?.onNewMessage;
 
   useEffect(() => {
     if (!organizationId) return;
@@ -25,8 +28,18 @@ export function useMailboxRealtime(
         table: 'conversations',
         filter: `organization_id=eq.${organizationId}`,
       },
-      () => {
+      (payload) => {
         queryClient.invalidateQueries({ queryKey: ['conversations', organizationId] });
+        queryClient.invalidateQueries({ queryKey: ['inbox-unread-count', organizationId] });
+        if (!payload.new || !onNewMessageRef.current) return;
+        const row = payload.new as { id?: string; unread_count?: number };
+        const convId = row.id;
+        const unread = row.unread_count ?? 0;
+        if (!convId || unread === 0) return;
+        const shouldNotify =
+          (payload.eventType === 'INSERT' && unread > 0) ||
+          (payload.eventType === 'UPDATE' && convId !== selectedConversationId && unread > 0);
+        if (shouldNotify) onNewMessageRef.current(convId);
       }
     );
 
@@ -48,7 +61,7 @@ export function useMailboxRealtime(
     return () => {
       void supabase.removeChannel(ch);
     };
-  }, [organizationId, queryClient]);
+  }, [organizationId, queryClient, selectedConversationId]);
 
   useEffect(() => {
     if (!selectedConversationId) return;

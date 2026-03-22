@@ -163,20 +163,54 @@
     document.body.appendChild(container);
   }
 
+  function getStorageKey(t, suffix) {
+    return "agentslabs_" + (suffix || "visitor") + "_" + (t || "").replace(/[^a-zA-Z0-9-]/g, "_");
+  }
+
   function getSavedVisitorData(t) {
     try {
-      var key = "agentslabs_visitor_" + (t || "").replace(/[^a-zA-Z0-9-]/g, "_");
-      var raw = localStorage.getItem(key);
+      var raw = localStorage.getItem(getStorageKey(t, "visitor"));
       return raw ? JSON.parse(raw) : null;
     } catch (e) { return null; }
   }
 
   function saveVisitorData(t, data) {
     try {
-      var key = "agentslabs_visitor_" + (t || "").replace(/[^a-zA-Z0-9-]/g, "_");
-      localStorage.setItem(key, JSON.stringify(data));
+      localStorage.setItem(getStorageKey(t, "visitor"), JSON.stringify(data));
     } catch (e) {}
   }
+
+  function getOrCreateIdentifier(t) {
+    try {
+      var key = getStorageKey(t, "identifier");
+      var id = localStorage.getItem(key);
+      if (!id) {
+        id = "v_" + Math.random().toString(36).slice(2) + "_" + Date.now().toString(36);
+        localStorage.setItem(key, id);
+      }
+      return id;
+    } catch (e) { return "v_" + Date.now(); }
+  }
+
+  function getSavedConversationId(t) {
+    try {
+      return localStorage.getItem(getStorageKey(t, "conversation")) || null;
+    } catch (e) { return null; }
+  }
+
+  function saveConversationId(t, id) {
+    try {
+      if (id) localStorage.setItem(getStorageKey(t, "conversation"), id);
+      else localStorage.removeItem(getStorageKey(t, "conversation"));
+    } catch (e) {}
+  }
+
+  window.addEventListener("message", function (e) {
+    var d = e.data;
+    if (d && d.type === "agentslabs_conversation" && d.token && d.conversation_id) {
+      saveConversationId(d.token, d.conversation_id);
+    }
+  });
 
   function escapeHtml(s) {
     var div = document.createElement("div");
@@ -189,6 +223,10 @@
     var appBase = m ? m[1] : window.location.origin;
     var apiUrl = scriptEl.getAttribute("data-api-url") || "";
     var chatUrl = appBase + "/chat?token=" + encodeURIComponent(token) + "&api_url=" + encodeURIComponent(apiUrl);
+    var identifier = getOrCreateIdentifier(token);
+    chatUrl += "&identifier=" + encodeURIComponent(identifier);
+    var savedConvId = getSavedConversationId(token);
+    if (savedConvId) chatUrl += "&conversation_id=" + encodeURIComponent(savedConvId);
     if (prechatData && typeof prechatData === "object" && Object.keys(prechatData).length) {
       chatUrl += "&prechat_data=" + encodeURIComponent(JSON.stringify(prechatData));
     }

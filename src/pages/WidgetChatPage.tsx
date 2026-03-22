@@ -21,6 +21,7 @@ export default function WidgetChatPage() {
   const apiUrl = searchParams.get('api_url') || '';
   const prechatParam = searchParams.get('prechat_data');
   const existingConvId = searchParams.get('conversation_id');
+  const identifier = searchParams.get('identifier');
 
   const [conversationId, setConversationId] = useState<string | null>(existingConvId);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -70,10 +71,14 @@ export default function WidgetChatPage() {
         let convId = existingConvId;
 
         if (!convId) {
+          const payload: { prechat?: Record<string, string>; identifier?: string } = {};
+          if (Object.keys(prechat).length) payload.prechat = prechat;
+          if (identifier) payload.identifier = identifier;
+
           const res = await fetch(`${baseApi}/widget-chat?token=${encodeURIComponent(token)}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prechat: Object.keys(prechat).length ? prechat : undefined }),
+            body: JSON.stringify(payload),
           });
 
           if (!res.ok) {
@@ -84,6 +89,11 @@ export default function WidgetChatPage() {
           const data = await res.json();
           convId = data.conversation_id;
           setConversationId(convId);
+          if (token && convId && window.parent !== window) {
+            try {
+              window.parent.postMessage({ type: 'agentslabs_conversation', token, conversation_id: convId }, '*');
+            } catch {}
+          }
         }
 
         const msgRes = await fetch(
@@ -104,7 +114,7 @@ export default function WidgetChatPage() {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [token, baseApi, existingConvId]);
+  }, [token, baseApi, existingConvId, identifier]);
 
   // Polling de mensagens
   useEffect(() => {

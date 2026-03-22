@@ -128,6 +128,7 @@ Deno.serve(async (req) => {
       continue;
     }
 
+    // Payload format (Chatwoot parity): event, id, content, sender, contact, conversation, account
     const rawBody = JSON.stringify({
       ...(row.payload as Record<string, unknown>),
       delivery_id: row.delivery_id,

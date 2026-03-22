@@ -20,6 +20,8 @@ interface OrgMember {
   display_name: string | null;
   avatar_url: string | null;
   status: string | null;
+  auto_offline?: boolean;
+  message_signature?: string | null;
 }
 
 interface OrgContextType {
@@ -63,17 +65,27 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // Consulta em dois passos: o embed organizations(...) pode vir null com RLS/PostgREST
       // e deixava currentOrg sempre null → onboarding incorrecto.
-      const { data: members, error: membersError } = await supabase
+      const cols = 'id, organization_id, user_id, role, display_name, avatar_url, status, auto_offline';
+      let members: { id: string; organization_id: string; user_id: string; role: string; display_name: string | null; avatar_url: string | null; status: string | null; auto_offline?: boolean; message_signature?: string | null }[];
+      const { data: data1, error: membersError } = await supabase
         .from('organization_members')
-        .select('id, organization_id, user_id, role, display_name, avatar_url, status')
+        .select(`${cols}, message_signature`)
         .eq('user_id', user.id);
-
       if (membersError) {
-        console.error('[OrgContext] organization_members', membersError);
-        return;
+        const { data: data2, error: err2 } = await supabase
+          .from('organization_members')
+          .select(cols)
+          .eq('user_id', user.id);
+        if (err2) {
+          console.error('[OrgContext] organization_members', membersError);
+          return;
+        }
+        members = (data2 ?? []).map((m) => ({ ...m, message_signature: null }));
+      } else {
+        members = (data1 ?? []) as typeof data1 & { message_signature?: string | null }[];
       }
 
-      if (!members?.length) {
+      if (!members.length) {
         setOrganizations([]);
         setCurrentOrg(null);
         setCurrentMember(null);
@@ -117,6 +129,8 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               display_name: member.display_name,
               avatar_url: member.avatar_url,
               status: member.status,
+              auto_offline: (member as { auto_offline?: boolean }).auto_offline,
+              message_signature: (member as { message_signature?: string | null }).message_signature,
             }
           : null
       );
@@ -133,21 +147,47 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!user || !currentOrg) return;
     let cancelled = false;
     (async () => {
-      const { data: m } = await supabase
+      const { data: m, error } = await supabase
         .from('organization_members')
-        .select('id, organization_id, user_id, role, display_name, avatar_url, status')
+        .select('id, organization_id, user_id, role, display_name, avatar_url, status, auto_offline, message_signature')
         .eq('user_id', user.id)
         .eq('organization_id', currentOrg.id)
         .maybeSingle();
-      if (cancelled || !m) return;
+      if (cancelled) return;
+      if (!m && error) {
+        const { data: m2 } = await supabase
+            .from('organization_members')
+            .select('id, organization_id, user_id, role, display_name, avatar_url, status, auto_offline')
+            .eq('user_id', user.id)
+            .eq('organization_id', currentOrg.id)
+            .maybeSingle();
+        if (cancelled || !m2) return;
+        const mm = m2 as typeof m2 & { message_signature?: string | null };
+        setCurrentMember({
+          id: mm.id,
+          organization_id: mm.organization_id,
+          user_id: mm.user_id,
+          role: mm.role,
+          display_name: mm.display_name,
+          avatar_url: mm.avatar_url,
+          status: mm.status,
+          auto_offline: (mm as { auto_offline?: boolean }).auto_offline ?? true,
+          message_signature: null,
+        });
+        return;
+      }
+      if (!m) return;
+      const mm = m as typeof m & { auto_offline?: boolean; message_signature?: string | null };
       setCurrentMember({
-        id: m.id,
-        organization_id: m.organization_id,
-        user_id: m.user_id,
-        role: m.role,
-        display_name: m.display_name,
-        avatar_url: m.avatar_url,
-        status: m.status,
+        id: mm.id,
+        organization_id: mm.organization_id,
+        user_id: mm.user_id,
+        role: mm.role,
+        display_name: mm.display_name,
+        avatar_url: mm.avatar_url,
+        status: mm.status,
+        auto_offline: mm.auto_offline ?? true,
+        message_signature: mm.message_signature,
       });
     })();
     return () => {
@@ -158,16 +198,17 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     if (!user || !currentMember) return;
     const memberId = currentMember.id;
+    const autoOffline = currentMember.auto_offline ?? true;
     const pulse = async () => {
-      // Apenas status: last_seen_at é preenchido na BD (trigger) quando a migration existir.
-      // Enviar last_seen_at no PATCH falha com 400 se a coluna ainda não foi aplicada no projeto.
       await supabase.from('organization_members').update({ status: 'online' }).eq('id', memberId);
     };
     pulse();
     const interval = window.setInterval(pulse, 45_000);
     const onVisibility = () => {
       if (document.visibilityState === 'hidden') {
-        void supabase.from('organization_members').update({ status: 'offline' }).eq('id', memberId);
+        if (autoOffline) {
+          void supabase.from('organization_members').update({ status: 'offline' }).eq('id', memberId);
+        }
       } else {
         void pulse();
       }
@@ -177,7 +218,7 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       window.clearInterval(interval);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [user, currentMember?.id]);
+  }, [user, currentMember?.id, currentMember?.auto_offline]);
 
   const handleSetCurrentOrg = (org: Organization) => {
     setCurrentOrg(org);

@@ -47,3 +47,6 @@ verify_jwt = false
 
 [functions.widget-chat]
 verify_jwt = false
+
+[functions.platform-api]
+verify_jwt = false

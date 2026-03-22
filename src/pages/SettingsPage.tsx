@@ -5,7 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Building2, User, Shield, Bot, Webhook, Copy, Check, Trash2, Plus, Star } from 'lucide-react';
+import { Building2, User, Shield, Bot, Webhook, Copy, Check, Trash2, Plus, Star, Volume2 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -34,6 +34,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import { WEBHOOK_EVENT_GROUPS, ALL_WEBHOOK_EVENT_IDS } from '@/lib/webhookEvents';
 import { parseCsatSettings, mergeCsatIntoOrgSettings, DEFAULT_CSAT_MESSAGE } from '@/lib/csatSettings';
+import { useNotificationSound } from '@/hooks/useNotificationSound';
 import type { Tables, Json } from '@/integrations/supabase/types';
 
 type AgentBot = Tables<'agent_bots'>;
@@ -85,6 +86,8 @@ const SettingsPage: React.FC = () => {
 
   const canEditOrgSettings =
     currentMember && ['owner', 'admin'].includes(currentMember.role);
+
+  const { play, isEnabled: soundEnabled, setEnabled: setSoundEnabled } = useNotificationSound();
 
   const [csatEnabled, setCsatEnabled] = useState(false);
   const [csatMessage, setCsatMessage] = useState(DEFAULT_CSAT_MESSAGE);
@@ -368,6 +371,25 @@ const SettingsPage: React.FC = () => {
               <div className="flex items-center gap-3">
                 <User className="h-5 w-5 text-muted-foreground" />
                 <h2 className="text-lg font-semibold">Minha conta</h2>
+              </div>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-lg border bg-muted/30 p-4">
+                <div className="space-y-1 min-w-0">
+                  <Label htmlFor="sound-enabled" className="flex items-center gap-2">
+                    <Volume2 className="h-4 w-4 text-muted-foreground" />
+                    Aviso sonoro de novas mensagens
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Reproduz um som quando chega uma mensagem em conversas não visualizadas.
+                  </p>
+                </div>
+                <Switch
+                  id="sound-enabled"
+                  checked={soundEnabled()}
+                  onCheckedChange={(v) => {
+                    setSoundEnabled(v);
+                    if (v) play();
+                  }}
+                />
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">

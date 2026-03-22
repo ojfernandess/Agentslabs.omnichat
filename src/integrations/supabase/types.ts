@@ -845,6 +845,7 @@ export type Database = {
         Row: {
           actions: Json
           created_at: string
+          description: string | null
           enabled: boolean
           id: string
           name: string
@@ -856,6 +857,7 @@ export type Database = {
         Insert: {
           actions?: Json
           created_at?: string
+          description?: string | null
           enabled?: boolean
           id?: string
           name: string
@@ -867,6 +869,7 @@ export type Database = {
         Update: {
           actions?: Json
           created_at?: string
+          description?: string | null
           enabled?: boolean
           id?: string
           name?: string
@@ -977,6 +980,7 @@ export type Database = {
         Row: {
           attribute_key: string
           created_at: string
+          description: string | null
           entity_type: string
           id: string
           label: string
@@ -989,6 +993,7 @@ export type Database = {
         Insert: {
           attribute_key: string
           created_at?: string
+          description?: string | null
           entity_type: string
           id?: string
           label: string
@@ -1001,6 +1006,7 @@ export type Database = {
         Update: {
           attribute_key?: string
           created_at?: string
+          description?: string | null
           entity_type?: string
           id?: string
           label?: string
@@ -1106,26 +1112,32 @@ export type Database = {
         Row: {
           actions: Json
           created_at: string
+          created_by: string | null
           id: string
           name: string
           organization_id: string
           updated_at: string
+          visibility: string
         }
         Insert: {
           actions?: Json
           created_at?: string
+          created_by?: string | null
           id?: string
           name: string
           organization_id: string
           updated_at?: string
+          visibility?: string
         }
         Update: {
           actions?: Json
           created_at?: string
+          created_by?: string | null
           id?: string
           name?: string
           organization_id?: string
           updated_at?: string
+          visibility?: string
         }
         Relationships: [
           {

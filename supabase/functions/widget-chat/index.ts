@@ -93,6 +93,7 @@ Deno.serve(async (req) => {
       conversation_id?: string;
       content?: string;
       prechat?: Record<string, string>;
+      identifier?: string;
     };
     try {
       body = await req.json();
@@ -103,17 +104,19 @@ Deno.serve(async (req) => {
     const conversationId = body.conversation_id?.trim();
     const content = body.content?.trim();
     const prechat = body.prechat ?? {};
+    const identifier = (body.identifier ?? "").trim();
 
     let convoId = conversationId;
 
     if (!convoId) {
-      // Inicializar: criar ou reutilizar contact + conversation
+      // Inicializar: criar ou reutilizar contact + conversation (estilo Chatwoot)
       const name = prechat.fullName ?? prechat.name ?? prechat.emailAddress ?? "Visitante";
       const email = prechat.emailAddress ?? prechat.email ?? null;
       const phone = prechat.phoneNumber ?? prechat.phone ?? null;
 
       let contactId: string | null = null;
 
+      // 1. Tentar por email (prioridade)
       if (email?.trim()) {
         const { data: existing } = await supabase
           .from("contacts")
@@ -129,12 +132,37 @@ Deno.serve(async (req) => {
             updated_at: new Date().toISOString(),
           };
           if (phone != null) updatePayload.phone = phone;
-          if (Object.keys(prechat).length > 0) updatePayload.custom_fields = prechat;
+          const cf = { ...prechat };
+          if (identifier) (cf as Record<string, string>).identifier = identifier;
+          if (Object.keys(cf).length > 0) updatePayload.custom_fields = cf;
           await supabase.from("contacts").update(updatePayload).eq("id", existing.id);
         }
       }
 
+      // 2. Sem email: tentar por identifier (mesmo visitante, nova sessão)
+      if (!contactId && identifier) {
+        const { data: byIdentifierList } = await supabase
+          .from("contacts")
+          .select("id")
+          .eq("organization_id", channel.organization_id)
+          .contains("custom_fields", { identifier })
+          .limit(1);
+        const byIdentifier = (byIdentifierList && Array.isArray(byIdentifierList) ? byIdentifierList[0] : null) as { id: string } | null;
+        if (byIdentifier) {
+          contactId = byIdentifier.id;
+          const updatePayload: Record<string, unknown> = {
+            name: name || "Visitante",
+            updated_at: new Date().toISOString(),
+          };
+          if (phone != null) updatePayload.phone = phone;
+          if (Object.keys(prechat).length > 0) updatePayload.custom_fields = { ...prechat, identifier };
+          await supabase.from("contacts").update(updatePayload).eq("id", byIdentifier.id);
+        }
+      }
+
       if (!contactId) {
+        const cf: Record<string, string> = { ...prechat };
+        if (identifier) cf.identifier = identifier;
         const { data: contact, error: contactErr } = await supabase
           .from("contacts")
           .insert({
@@ -142,7 +170,7 @@ Deno.serve(async (req) => {
             name: name || "Visitante",
             email: email || null,
             phone: phone || null,
-            custom_fields: Object.keys(prechat).length ? prechat : {},
+            custom_fields: Object.keys(cf).length ? cf : {},
           })
           .select("id")
           .single();
@@ -154,9 +182,10 @@ Deno.serve(async (req) => {
         contactId = contact.id;
       }
 
+      // Reutilizar conversa open/pending para o mesmo contato+canal (Chatwoot)
       const { data: existingConvo } = await supabase
         .from("conversations")
-        .select("id")
+        .select("id, unread_count")
         .eq("contact_id", contactId)
         .eq("channel_id", channel.id)
         .in("status", ["open", "pending"])
@@ -194,6 +223,14 @@ Deno.serve(async (req) => {
           content,
           content_type: "text",
         });
+        const prevUnread = (existingConvo?.unread_count as number | null) ?? 0;
+        await supabase
+          .from("conversations")
+          .update({
+            last_message_at: new Date().toISOString(),
+            unread_count: prevUnread + 1,
+          })
+          .eq("id", convoId);
       }
 
       return new Response(
@@ -209,7 +246,7 @@ Deno.serve(async (req) => {
 
     const { data: convo, error: convoErr } = await supabase
       .from("conversations")
-      .select("id, contact_id")
+      .select("id, contact_id, status, snoozed_until")
       .eq("id", convoId)
       .eq("channel_id", channel.id)
       .maybeSingle();
@@ -230,6 +267,14 @@ Deno.serve(async (req) => {
     if (msgErr) {
       return jsonErr("Erro ao enviar mensagem", 500);
     }
+
+    // Chatwoot: mensagem do contacto reabre conversa adiada ou resolvida
+    if (convo.status === "snoozed" || convo.status === "resolved") {
+      patch.status = "open";
+      patch.snoozed_until = null;
+      if (convo.status === "resolved") patch.resolved_at = null;
+    }
+    await supabase.from("conversations").update(patch).eq("id", convoId);
 
     return new Response(
       JSON.stringify({ conversation_id: convoId }),

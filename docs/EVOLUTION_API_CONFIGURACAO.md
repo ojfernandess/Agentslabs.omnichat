@@ -81,13 +81,15 @@ apikey: SUA_API_KEY
   "enabled": true,
   "url": "https://uyagfnkcmcuijlzshmog.supabase.co/functions/v1/evolution-whatsapp-webhook?channel_id=ID_DA_CAIXA",
   "webhookByEvents": false,
-  "webhookBase64": false,
+  "webhookBase64": true,
   "events": [
     "MESSAGES_UPSERT",
     "CONNECTION_UPDATE"
   ]
 }
 ```
+
+> **Áudio:** Para mensagens de áudio serem reproduzidas no chat, ative `webhookBase64: true`. Assim o sistema recebe o ficheiro e exibe o player. Se não for possível ativar, o sistema tenta obter o áudio via API (requer config correta em base_url, api_key, instance_name).
 
 Troque:
 - `Teste%20Labs` pelo nome da sua instância (com espaço codificado como `%20`)
@@ -143,6 +145,7 @@ Se o seu painel Evolution tiver tela de configuração de webhook:
 
 ## 7. Troubleshooting
 
+- **Áudio recebido mostra apenas "Áudio" sem player:** Ative `webhookBase64: true` no webhook da Evolution (via POST `/webhook/set/{instância}`). Se já estiver ativo e não funcionar, verifique se base_url, api_key e instance_name estão corretos na configuração da caixa — o sistema usa a API `getBase64FromMediaMessage` como alternativa.
 - **Mensagens não chegam:** Verifique se o webhook está registrado na Evolution com o evento `MESSAGES_UPSERT` e se o `channel_id` é o da caixa criada no Agents Labs (não o ID da instância Evolution).
 - **Erro 404 no webhook:** Confirme que as Edge Functions foram publicadas:  
   `supabase functions deploy evolution-whatsapp-webhook`  

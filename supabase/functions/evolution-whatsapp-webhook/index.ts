@@ -92,6 +92,11 @@ type NormalizedInbound = {
   textBody: string;
   externalId: string;
   profileName?: string;
+  contentType?: string;
+  rawMessage?: Record<string, unknown>;
+  /** Base64 do áudio quando webhook_base64=true na Evolution */
+  audioBase64?: string;
+  audioMimetype?: string;
 };
 
 async function notifyAgentBot(
@@ -167,6 +172,10 @@ function normalizeEvolutionInbound(body: Record<string, unknown>): NormalizedInb
     const mid = String(key.id ?? "");
     if (!mid) continue;
 
+    const digits = remoteJid.split("@")[0]?.replace(/\D/g, "") ?? "";
+    const phone = digits.length > 0 ? `+${digits}` : remoteJid;
+    const profileName = typeof m.pushName === "string" ? m.pushName : undefined;
+
     const msg = m.message as Record<string, unknown> | undefined;
     let textBody = "";
     if (msg?.conversation) textBody = String(msg.conversation);
@@ -179,17 +188,25 @@ function normalizeEvolutionInbound(body: Record<string, unknown>): NormalizedInb
       const cap = (msg.videoMessage as { caption?: string }).caption;
       textBody = cap ? String(cap) : "[vídeo]";
     } else if (msg?.audioMessage) {
-      textBody = "[áudio]";
+      const audioMsg = msg.audioMessage as Record<string, unknown> | undefined;
+      const b64 = audioMsg?.base64 as string | undefined;
+      const mt = audioMsg?.mimetype as string | undefined;
+      textBody = "🎤 Áudio";
+      out.push({
+        phone,
+        textBody,
+        externalId: mid,
+        profileName,
+        contentType: "audio",
+        rawMessage: m as Record<string, unknown>,
+        ...(b64 && { audioBase64: b64, audioMimetype: mt }),
+      });
+      continue;
     } else if (msg?.documentMessage) {
       textBody = "[documento]";
     } else if (msg) {
       textBody = `[${Object.keys(msg)[0] ?? "mensagem"}]`;
     }
-
-    const digits = remoteJid.split("@")[0]?.replace(/\D/g, "") ?? "";
-    const phone = digits.length > 0 ? `+${digits}` : remoteJid;
-
-    const profileName = typeof m.pushName === "string" ? m.pushName : undefined;
 
     out.push({
       phone,
@@ -202,16 +219,127 @@ function normalizeEvolutionInbound(body: Record<string, unknown>): NormalizedInb
   return out;
 }
 
+async function uploadToStorageWithRetry(
+  supabase: SupabaseClient,
+  path: string,
+  bin: Uint8Array,
+  contentType: string,
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const { error } = await supabase.storage.from("message-media").upload(path, bin, {
+      contentType,
+      upsert: false,
+    });
+    if (!error) return true;
+    const isRetryable = error.message.includes("timeout") || error.message.includes("timed out") || error.message.includes("connection");
+    if (attempt < 3 && isRetryable) {
+      await new Promise((r) => setTimeout(r, 1000 * attempt));
+    } else {
+      console.error("[evolution-audio] storage upload error", error.message);
+      return false;
+    }
+  }
+  return false;
+}
+
+async function uploadAudioBase64(
+  supabase: SupabaseClient,
+  orgId: string,
+  conversationId: string,
+  base64: string,
+  mimetype?: string,
+): Promise<Array<{ url: string; mime_type: string }> | null> {
+  try {
+    const bin = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    const ext = mimetype?.includes("ogg") ? "ogg" : mimetype?.includes("mpeg") ? "mp3" : "bin";
+    const path = `${orgId}/${conversationId}/${crypto.randomUUID()}.${ext}`;
+    const ct = mimetype ?? "audio/ogg";
+    if (!(await uploadToStorageWithRetry(supabase, path, bin, ct))) return null;
+    const { data: pub } = supabase.storage.from("message-media").getPublicUrl(path);
+    return [{ url: pub.publicUrl, mime_type: ct }];
+  } catch {
+    return null;
+  }
+}
+
+async function fetchEvolutionAudioAndUpload(
+  baseUrl: string,
+  apiKey: string,
+  instanceName: string,
+  rawMessage: Record<string, unknown>,
+  supabase: SupabaseClient,
+  orgId: string,
+  conversationId: string,
+): Promise<Array<{ url: string; mime_type: string }> | null> {
+  const key = rawMessage.key as Record<string, unknown> | undefined;
+  const keyId = key?.id as string | undefined;
+  if (!keyId) {
+    console.error("[evolution-audio] missing key.id in rawMessage");
+    return null;
+  }
+  const url = `${baseUrl.replace(/\/$/, "")}/chat/getBase64FromMediaMessage/${encodeURIComponent(instanceName)}`;
+  const payloads = [
+    { message: { key: { id: keyId } }, convertToMp4: false },
+    { message: rawMessage, convertToMp4: false },
+  ];
+  for (const bodyPayload of payloads) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: apiKey,
+        },
+        body: JSON.stringify(bodyPayload),
+      });
+      const json = (await res.json()) as Record<string, unknown>;
+      const dataObj = json.data as Record<string, unknown> | undefined;
+      const msgObj = dataObj?.message as Record<string, unknown> | undefined;
+      const base64 = (json.base64 ?? dataObj?.base64 ?? msgObj?.base64) as string | undefined;
+      const mimetype = (json.mimetype ?? dataObj?.mimetype ?? msgObj?.mimetype) as string | undefined;
+      if (!res.ok) {
+        console.error("[evolution-audio] API error", res.status, JSON.stringify(json).slice(0, 300));
+        continue;
+      }
+      if (!base64 || typeof base64 !== "string") {
+        console.error("[evolution-audio] no base64 in response", Object.keys(json));
+        continue;
+      }
+      const bin = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+      const ext = mimetype?.includes("ogg") ? "ogg" : mimetype?.includes("mpeg") ? "mp3" : "bin";
+      const path = `${orgId}/${conversationId}/${crypto.randomUUID()}.${ext}`;
+      const ct = mimetype ?? "audio/ogg";
+      if (await uploadToStorageWithRetry(supabase, path, bin, ct)) {
+        const { data: pub } = supabase.storage.from("message-media").getPublicUrl(path);
+        return [{ url: pub.publicUrl, mime_type: ct }];
+      }
+      continue;
+    } catch (e) {
+      console.error("[evolution-audio] fetch/upload error", String(e));
+      continue;
+    }
+  }
+  console.error("[evolution-audio] all payloads failed for key.id", keyId);
+  return null;
+}
+
 async function processInboundBatch(
   supabase: SupabaseClient,
   channel: ChannelRow,
   items: NormalizedInbound[],
 ) {
+  const cfg = (channel.config ?? {}) as Record<string, unknown>;
+  const evolution = (cfg.evolution ?? {}) as Record<string, unknown>;
+  const baseUrl = String(evolution.base_url ?? evolution.baseUrl ?? cfg.evolution_base_url ?? "").replace(/\/$/, "");
+  const apiKey = String(evolution.api_key ?? evolution.apiKey ?? cfg.evolution_api_key ?? "");
+  const instanceName = String(evolution.instance_name ?? evolution.instanceName ?? cfg.evolution_instance_name ?? "");
+
   for (const it of items) {
     const textBody = it.textBody;
     const mid = it.externalId;
     const profileName = it.profileName;
     const phone = it.phone;
+    const contentType = it.contentType ?? "text";
 
     const { data: existing } = await supabase
       .from("contacts")
@@ -444,17 +572,51 @@ async function processInboundBatch(
       });
     }
 
+    let attachments: Array<{ url: string; mime_type?: string }> = [];
+    if (contentType === "audio") {
+      if (it.audioBase64) {
+        const media = await uploadAudioBase64(supabase, channel.organization_id, conversationId, it.audioBase64, it.audioMimetype);
+        if (media) attachments = media;
+      } else if (it.rawMessage && baseUrl && apiKey && instanceName) {
+        const media = await fetchEvolutionAudioAndUpload(
+          baseUrl,
+          apiKey,
+          instanceName,
+          it.rawMessage,
+          supabase,
+          channel.organization_id,
+          conversationId,
+        );
+        if (media) attachments = media;
+      } else if (!it.audioBase64 && (!baseUrl || !apiKey || !instanceName)) {
+        console.error("[evolution-audio] config incompleto: base_url, api_key e instance_name necessários em channel.config.evolution");
+      }
+    }
+
+    const insertPayload: Record<string, unknown> = {
+      conversation_id: conversationId,
+      sender_type: "contact",
+      sender_id: contactId,
+      message_type: "incoming",
+      content: textBody || "[texto]",
+      content_type: contentType,
+      metadata: {
+        evolution_message_id: mid,
+        raw_type: contentType === "audio" ? "audio" : "text",
+        source: "evolution",
+      },
+    };
+    if (attachments.length > 0) {
+      insertPayload.attachments = attachments.map((a) => ({
+        url: a.url,
+        mime_type: a.mime_type ?? "audio/ogg",
+        file_name: `audio-${Date.now()}.ogg`,
+      }));
+    }
+
     const { data: msgRow, error: mErr } = await supabase
       .from("messages")
-      .insert({
-        conversation_id: conversationId,
-        sender_type: "contact",
-        sender_id: contactId,
-        message_type: "incoming",
-        content: textBody || "[texto]",
-        content_type: "text",
-        metadata: { evolution_message_id: mid, raw_type: "text", source: "evolution" },
-      })
+      .insert(insertPayload)
       .select("id")
       .single();
     if (mErr) throw mErr;
@@ -474,7 +636,7 @@ async function processInboundBatch(
       timestamp: new Date().toISOString(),
       id: msgRow!.id,
       message_type: "incoming",
-      content_type: "text",
+      content_type: contentType,
       content: textBody,
       conversation: {
         id: conversationId,

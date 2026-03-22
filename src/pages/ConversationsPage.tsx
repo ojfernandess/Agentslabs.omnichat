@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useOrg } from '@/contexts/OrgContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -33,13 +34,14 @@ import {
 import { toast } from 'sonner';
 import { compressImageFileForUpload } from '@/lib/mediaClient';
 import { uploadMessageAttachment } from '@/lib/messageAttachmentUpload';
-import { useMailboxRealtime } from '@/hooks/useMailboxRealtime';
+import { useSelectedConversation } from '@/contexts/SelectedConversationContext';
 import { parseCsatSettings } from '@/lib/csatSettings';
 import {
   Search, Plus, Send, Paperclip, MoreVertical, User, Clock,
   CheckCircle2, AlertCircle, MessageSquare, Inbox, Star, RotateCcw,
-  Moon, StickyNote, Copy, Check, RefreshCw, PanelRightClose, PanelRightOpen,
-  UserPlus, Mail, Trash2,
+  Moon, StickyNote, Copy, Check, RefreshCw, PanelRightClose,
+  UserPlus, Mail, Trash2, Play, X, Building2, Phone, Pencil,
+  Info, ExternalLink, Users, Tag, Mic, Square, FileText,
 } from 'lucide-react';
 import {
   Select,
@@ -48,6 +50,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -90,10 +103,12 @@ const statusIcons: Record<string, React.ReactNode> = {
 };
 
 const ConversationsPage: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
   const { currentOrg, currentMember } = useOrg();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
-  const [selectedConvoId, setSelectedConvoId] = useState<string | null>(null);
+  const { selectedConversationId: selectedConvoId, setSelectedConversationId: setSelectedConvoId } = useSelectedConversation();
   const [searchTerm, setSearchTerm] = useState('');
   const [messageText, setMessageText] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('open');
@@ -103,7 +118,7 @@ const ConversationsPage: React.FC = () => {
   const [noteMode, setNoteMode] = useState(false);
   const [csatScore, setCsatScore] = useState<number | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  const [contactSidebarOpen, setContactSidebarOpen] = useState(true);
+  const [contactSidebarOpen, setContactSidebarOpen] = useState(false);
   const [addContactOpen, setAddContactOpen] = useState(false);
   const [newMessageOpen, setNewMessageOpen] = useState(false);
   const [addContactForm, setAddContactForm] = useState({ name: '', email: '', phone: '', company: '' });
@@ -115,10 +130,43 @@ const ConversationsPage: React.FC = () => {
   });
   const [deleteConvoId, setDeleteConvoId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [unreadBalloonDismissed, setUnreadBalloonDismissed] = useState(false);
+  const [executingMacroId, setExecutingMacroId] = useState<string | null>(null);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [addLabelsOpen, setAddLabelsOpen] = useState(false);
+  const [contactNoteEditOpen, setContactNoteEditOpen] = useState(false);
+  const [contactDeleteConfirmOpen, setContactDeleteConfirmOpen] = useState(false);
+  const [contactNoteText, setContactNoteText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const [composerModKey, setComposerModKey] = useState<'⌘' | 'Ctrl'>('Ctrl');
+  const [composerModKey, setComposerModKey] = useState<'enter' | 'mod_enter'>(() => {
+    try {
+      const v = localStorage.getItem('agentslabs_composer_mod_key');
+      return v === 'enter' ? 'enter' : 'mod_enter';
+    } catch { return 'mod_enter'; }
+  });
+  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [templateForm, setTemplateForm] = useState({ name: '', language: 'en', bodyParams: '' });
+
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'agentslabs_composer_mod_key' && e.newValue) {
+        setComposerModKey(e.newValue === 'enter' ? 'enter' : 'mod_enter');
+      }
+    };
+    const onCustom = (e: Event) => {
+      const v = (e as CustomEvent<string>).detail;
+      if (v === 'enter' || v === 'mod_enter') setComposerModKey(v);
+    };
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('composerModKeyChanged' as never, onCustom as never);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('composerModKeyChanged' as never, onCustom as never);
+    };
+  }, []);
 
   const { data: orgMembers = [] } = useQuery({
     queryKey: ['org-members-select', currentOrg?.id],
@@ -136,7 +184,7 @@ const ConversationsPage: React.FC = () => {
 
   // Fetch conversations (atribuição + caixa, estilo Chatwoot)
   const { data: conversations = [] } = useQuery({
-    queryKey: ['conversations', currentOrg?.id, statusFilter],
+    queryKey: ['conversations', currentOrg?.id, statusFilter, currentMember?.id],
     queryFn: async () => {
       if (!currentOrg) return [];
       let query = supabase
@@ -144,15 +192,19 @@ const ConversationsPage: React.FC = () => {
         .select(
           `
           *,
-          contacts(name, email, phone, avatar_url, custom_fields),
-          channels(name, channel_type),
-          assignee:organization_members!conversations_assignee_id_fkey(id, display_name)
+          contacts(id, name, email, phone, company, notes, avatar_url, custom_fields),
+          channels(name, channel_type, config),
+          assignee:organization_members!conversations_assignee_id_fkey(id, display_name, avatar_url)
         `
         )
         .eq('organization_id', currentOrg.id)
         .order('last_message_at', { ascending: false });
 
-      if (statusFilter !== 'all') {
+      if (statusFilter === 'mine' && currentMember?.id) {
+        query = query.eq('assignee_id', currentMember.id);
+      } else if (statusFilter === 'unassigned') {
+        query = query.is('assignee_id', null);
+      } else if (statusFilter !== 'all') {
         query = query.eq('status', statusFilter as Database['public']['Enums']['conversation_status']);
       }
 
@@ -160,11 +212,15 @@ const ConversationsPage: React.FC = () => {
       if (error) {
         const { data: fallback } = await supabase
           .from('conversations')
-          .select('*, contacts(name, email, phone, avatar_url, custom_fields), channels(name, channel_type)')
+          .select('*, contacts(id, name, email, phone, company, notes, avatar_url, custom_fields), channels(name, channel_type, config)')
           .eq('organization_id', currentOrg.id)
           .order('last_message_at', { ascending: false });
         let rows = fallback ?? [];
-        if (statusFilter !== 'all') {
+        if (statusFilter === 'mine' && currentMember?.id) {
+          rows = rows.filter((c: any) => c.assignee_id === currentMember.id);
+        } else if (statusFilter === 'unassigned') {
+          rows = rows.filter((c: any) => !c.assignee_id);
+        } else if (statusFilter !== 'all') {
           rows = rows.filter((c) => c.status === statusFilter);
         }
         return rows;
@@ -173,8 +229,6 @@ const ConversationsPage: React.FC = () => {
     },
     enabled: !!currentOrg,
   });
-
-  useMailboxRealtime(currentOrg?.id, selectedConvoId);
 
   useEffect(() => {
     if (!selectedConvoId || !currentOrg) return;
@@ -185,6 +239,29 @@ const ConversationsPage: React.FC = () => {
   }, [selectedConvoId, currentOrg?.id, queryClient]);
 
   const selectedConvo = conversations.find((c: any) => c.id === selectedConvoId);
+
+  // Estado da navegação: Enviar Mensagem (Contatos) ou Ver detalhes (contactId)
+  useEffect(() => {
+    const state = location.state as { openNewMessage?: boolean; contactId?: string } | null;
+    if (!state) return;
+    if (state.openNewMessage) {
+      setNewMessageOpen(true);
+      navigate(location.pathname, { replace: true, state: {} });
+      return;
+    }
+    if (state.contactId) {
+      const convo = conversations.find(
+        (c: any) => c.contact_id === state.contactId || (c as any).contacts?.id === state.contactId
+      );
+      if (convo) {
+        setSelectedConvoId(convo.id);
+      } else {
+        setNewMessageForm((prev) => ({ ...prev, selectedContactId: state.contactId!, contactSearch: '' }));
+        setNewMessageOpen(true);
+      }
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, location.pathname, conversations, navigate, setSelectedConvoId]);
 
   // Fetch messages for selected conversation
   const { data: messages = [] } = useQuery({
@@ -280,16 +357,49 @@ const ConversationsPage: React.FC = () => {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const updateContactNotes = useMutation({
+    mutationFn: async ({ contactId, notes }: { contactId: string; notes: string }) => {
+      const { error } = await supabase.from('contacts').update({ notes: notes || null }).eq('id', contactId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      setContactNoteEditOpen(false);
+      toast.success('Nota atualizada');
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deleteContactMutation = useMutation({
+    mutationFn: async (contactId: string) => {
+      const { error: convErr } = await supabase.from('conversations').delete().eq('contact_id', contactId);
+      if (convErr) throw convErr;
+      const { error } = await supabase.from('contacts').delete().eq('id', contactId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      setContactDeleteConfirmOpen(false);
+      setSelectedConvoId(null);
+      toast.success('Contato excluído');
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   // Send message (ou nota privada — visível só à equipa, como no Chatwoot)
   const sendMessage = useMutation({
     mutationFn: async ({ content, asNote }: { content: string; asNote: boolean }) => {
       if (!selectedConvoId || !currentMember) return;
+      const finalContent = !asNote && currentMember.message_signature?.trim()
+        ? `${content.trim()}\n\n${currentMember.message_signature.trim()}`
+        : content.trim();
       await supabase.from('messages').insert({
         conversation_id: selectedConvoId,
         sender_type: 'agent',
         sender_id: currentMember.id,
         message_type: asNote ? 'note' : 'outgoing',
-        content,
+        content: finalContent,
         is_private: asNote,
       });
       const { data: convoMeta } = await supabase
@@ -305,7 +415,7 @@ const ConversationsPage: React.FC = () => {
 
       if (!asNote) {
         const { error: sendErr } = await supabase.functions.invoke('send-outbound-message', {
-          body: { conversation_id: selectedConvoId, content: content.trim() },
+          body: { conversation_id: selectedConvoId, content: finalContent },
         });
         if (sendErr) {
           const msg = (sendErr as { context?: { body?: { error?: string } } })?.context?.body?.error ?? sendErr.message;
@@ -318,6 +428,110 @@ const ConversationsPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
       setMessageText('');
       setNoteMode(false);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const isWhatsAppCloud = (() => {
+    const ch = selectedConvo?.channels as { channel_type?: string; config?: Record<string, unknown> } | undefined;
+    if (!ch || ch.channel_type !== 'whatsapp') return false;
+    const cfg = (ch.config ?? {}) as Record<string, unknown>;
+    const meta = (cfg.meta ?? {}) as Record<string, unknown>;
+    const evolution = (cfg.evolution ?? {}) as Record<string, unknown>;
+    const provider = String(cfg.whatsapp_provider ?? cfg.whatsappProvider ?? 'meta');
+    const hasMeta = !!(meta.phone_number_id ?? meta.phoneNumberId) && !!(meta.access_token ?? meta.accessToken);
+    const hasEvolution = !!(evolution.base_url ?? evolution.baseUrl ?? cfg.evolution_base_url) && !!(evolution.instance_name ?? evolution.instanceName ?? cfg.evolution_instance_name);
+    return hasMeta && (provider === 'meta' || !hasEvolution);
+  })();
+
+  const startRecordingAudio = async () => {
+    if (!selectedConvoId || !currentMember || !currentOrg) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        if (chunks.length === 0) return;
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const file = new File([blob], `audio-${Date.now()}.webm`, { type: 'audio/webm' });
+        try {
+          const up = await uploadMessageAttachment(currentOrg!.id, selectedConvoId!, file);
+          await supabase.from('messages').insert({
+            conversation_id: selectedConvoId,
+            sender_type: 'agent',
+            sender_id: currentMember!.id,
+            message_type: 'outgoing',
+            content: '🎤 Áudio',
+            content_type: 'audio',
+            attachments: [{ url: up.url, mime_type: up.mime_type, file_name: up.file_name, path: up.path }],
+          });
+          const { data: convoMeta } = await supabase.from('conversations').select('first_reply_at').eq('id', selectedConvoId).single();
+          const patch: Record<string, string> = { last_message_at: new Date().toISOString() };
+          if (!convoMeta?.first_reply_at) patch.first_reply_at = new Date().toISOString();
+          await supabase.from('conversations').update(patch).eq('id', selectedConvoId);
+          const { error: sendErr } = await supabase.functions.invoke('send-outbound-message', {
+            body: { conversation_id: selectedConvoId, content: '', content_type: 'audio', attachment_url: up.url },
+          });
+          if (sendErr) throw sendErr;
+          queryClient.invalidateQueries({ queryKey: ['messages', selectedConvoId] });
+          queryClient.invalidateQueries({ queryKey: ['conversations'] });
+          toast.success('Áudio enviado');
+        } catch (err) {
+          toast.error((err as Error).message || 'Falha ao enviar áudio');
+        }
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecordingAudio(true);
+    } catch (err) {
+      toast.error('Não foi possível aceder ao microfone');
+    }
+  };
+
+  const stopRecordingAudio = () => {
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current = null;
+      setIsRecordingAudio(false);
+    }
+  };
+
+  const sendTemplateMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedConvoId || !currentMember) return;
+      const { name, language, bodyParams } = templateForm;
+      if (!name.trim()) throw new Error('Nome do template obrigatório');
+      const params = bodyParams.trim() ? bodyParams.split('\n').map((p) => p.trim()).filter(Boolean) : [];
+      await supabase.from('messages').insert({
+        conversation_id: selectedConvoId,
+        sender_type: 'agent',
+        sender_id: currentMember.id,
+        message_type: 'outgoing',
+        content: `Template: ${name}${params.length ? ` (${params.join(', ')})` : ''}`,
+        content_type: 'template',
+      });
+      const { data: convoMeta } = await supabase.from('conversations').select('first_reply_at').eq('id', selectedConvoId).single();
+      const patch: Record<string, string> = { last_message_at: new Date().toISOString() };
+      if (!convoMeta?.first_reply_at) patch.first_reply_at = new Date().toISOString();
+      await supabase.from('conversations').update(patch).eq('id', selectedConvoId);
+      const { error: sendErr } = await supabase.functions.invoke('send-outbound-message', {
+        body: {
+          conversation_id: selectedConvoId,
+          content: '',
+          content_type: 'template',
+          template: { name: name.trim(), language: language.trim() || 'en', body_parameters: params },
+        },
+      });
+      if (sendErr) throw sendErr;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['messages', selectedConvoId] });
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      setTemplateDialogOpen(false);
+      setTemplateForm({ name: '', language: 'en', bodyParams: '' });
+      toast.success('Template enviado');
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -357,6 +571,85 @@ const ConversationsPage: React.FC = () => {
     },
     enabled: !!currentOrg && newMessageOpen,
   });
+
+  const { data: macros = [] } = useQuery({
+    queryKey: ['macros', currentOrg?.id],
+    queryFn: async () => {
+      if (!currentOrg) return [];
+      const { data } = await supabase
+        .from('macros')
+        .select('id, name, visibility, created_by')
+        .eq('organization_id', currentOrg.id)
+        .order('name');
+      return data ?? [];
+    },
+    enabled: !!currentOrg && !!selectedConvoId,
+  });
+
+  const { data: teams = [] } = useQuery({
+    queryKey: ['teams', currentOrg?.id],
+    queryFn: async () => {
+      if (!currentOrg) return [];
+      const { data } = await supabase
+        .from('teams')
+        .select('id, name')
+        .eq('organization_id', currentOrg.id)
+        .order('name');
+      return data ?? [];
+    },
+    enabled: !!currentOrg,
+  });
+
+  const { data: labels = [] } = useQuery({
+    queryKey: ['labels', currentOrg?.id],
+    queryFn: async () => {
+      if (!currentOrg) return [];
+      const { data } = await supabase
+        .from('labels')
+        .select('id, name, color')
+        .eq('organization_id', currentOrg.id)
+        .order('name');
+      return data ?? [];
+    },
+    enabled: !!currentOrg,
+  });
+
+  const { data: previousConversations = [] } = useQuery({
+    queryKey: ['previous-conversations', selectedConvo?.contact_id, selectedConvoId],
+    queryFn: async () => {
+      if (!selectedConvo?.contact_id || !currentOrg) return [];
+      const { data } = await supabase
+        .from('conversations')
+        .select('id, subject, last_message_at, status, channels(name, channel_type)')
+        .eq('organization_id', currentOrg.id)
+        .eq('contact_id', selectedConvo.contact_id)
+        .neq('id', selectedConvoId!)
+        .order('last_message_at', { ascending: false })
+        .limit(5);
+      return data ?? [];
+    },
+    enabled: !!selectedConvo?.contact_id && !!selectedConvoId && !!currentOrg,
+  });
+
+  const executeMacro = async (macroId: string) => {
+    if (!selectedConvoId || !currentMember) return;
+    setExecutingMacroId(macroId);
+    try {
+      const { data, error } = await supabase.functions.invoke('execute-macro', {
+        body: { conversation_id: selectedConvoId, macro_id: macroId },
+      });
+      if (error) throw error;
+      const res = data as { ok?: boolean; error?: string };
+      if (res?.error) throw new Error(res.error);
+      toast.success('Macro executada');
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['messages', selectedConvoId] });
+    } catch (e: unknown) {
+      toast.error((e as Error).message || 'Falha ao executar macro');
+    } finally {
+      setExecutingMacroId(null);
+    }
+  };
 
   const { data: channelsForMessage = [] } = useQuery({
     queryKey: ['channels-newmessage', currentOrg?.id],
@@ -475,6 +768,15 @@ const ConversationsPage: React.FC = () => {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const unreadConversations = conversations.filter((c: any) => (c.unread_count ?? 0) > 0);
+  const unreadCount = unreadConversations.length;
+
+  const prevUnreadRef = useRef(unreadCount);
+  useEffect(() => {
+    if (unreadCount > prevUnreadRef.current) setUnreadBalloonDismissed(false);
+    prevUnreadRef.current = unreadCount;
+  }, [unreadCount]);
+
   const filteredConversations = conversations.filter((c: any) => {
     if (!searchTerm) return true;
     const term = searchTerm.toLowerCase();
@@ -487,7 +789,9 @@ const ConversationsPage: React.FC = () => {
 
   const submitComposer = () => {
     if (!messageText.trim()) return;
-    sendMessage.mutate({ content: messageText.trim(), asNote: noteMode });
+    const content = messageText.trim();
+    setMessageText(''); // Limpar imediatamente (estilo Chatwoot)
+    sendMessage.mutate({ content, asNote: noteMode });
   };
 
   const handleSend = (e: React.FormEvent) => {
@@ -496,9 +800,24 @@ const ConversationsPage: React.FC = () => {
   };
 
   const handleComposerKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (!((e.metaKey || e.ctrlKey) && e.key === 'Enter')) return;
-    e.preventDefault();
-    submitComposer();
+    if (e.key !== 'Enter') return;
+    const mod = (() => {
+      try {
+        const v = localStorage.getItem('agentslabs_composer_mod_key');
+        return v === 'enter' ? 'enter' : 'mod_enter';
+      } catch { return 'mod_enter'; }
+    })();
+    if (mod === 'enter') {
+      if (e.shiftKey) return; // Shift+Enter = newline
+      e.preventDefault();
+      submitComposer();
+      return;
+    }
+    // mod_enter: Cmd/Ctrl+Enter = send
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      submitComposer();
+    }
   };
 
   const resolveMutation = useMutation({
@@ -635,13 +954,14 @@ const ConversationsPage: React.FC = () => {
     try {
       if (!file.type.startsWith('image/')) {
         const up = await uploadMessageAttachment(currentOrg.id, selectedConvoId, file);
+        const isAudio = file.type.startsWith('audio/');
         await supabase.from('messages').insert({
           conversation_id: selectedConvoId,
           sender_type: 'agent',
           sender_id: currentMember.id,
           message_type: 'outgoing',
-          content: `📎 ${up.file_name}`,
-          content_type: 'file',
+          content: isAudio ? '🎤 Áudio' : `📎 ${up.file_name}`,
+          content_type: isAudio ? 'audio' : 'file',
           attachments: [
             { url: up.url, mime_type: up.mime_type, file_name: up.file_name, path: up.path },
           ],
@@ -654,9 +974,18 @@ const ConversationsPage: React.FC = () => {
         const patch: Record<string, string> = { last_message_at: new Date().toISOString() };
         if (!convoMeta?.first_reply_at) patch.first_reply_at = new Date().toISOString();
         await supabase.from('conversations').update(patch).eq('id', selectedConvoId);
+        if (isAudio) {
+          const { error: sendErr } = await supabase.functions.invoke('send-outbound-message', {
+            body: { conversation_id: selectedConvoId, content: '', content_type: 'audio', attachment_url: up.url },
+          });
+          if (sendErr) {
+            const msg = (sendErr as { context?: { body?: { error?: string } } })?.context?.body?.error ?? sendErr.message;
+            throw new Error(msg || 'Falha ao enviar áudio para o canal.');
+          }
+        }
         queryClient.invalidateQueries({ queryKey: ['messages', selectedConvoId] });
         queryClient.invalidateQueries({ queryKey: ['conversations'] });
-        toast.success('Ficheiro enviado');
+        toast.success(isAudio ? 'Áudio enviado' : 'Ficheiro enviado');
         return;
       }
 
@@ -787,6 +1116,52 @@ const ConversationsPage: React.FC = () => {
           )}
         </div>
 
+        {unreadCount > 0 && !unreadBalloonDismissed && (
+          <div className="mx-2 mt-2 flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/10 px-4 py-3 shadow-md">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/20">
+              <MessageSquare className="h-4 w-4 text-primary" />
+            </div>
+            <div
+              className="min-w-0 flex-1 cursor-pointer"
+              onClick={() => {
+                const first = unreadConversations[0];
+                if (first) setSelectedConvoId(first.id);
+              }}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  const first = unreadConversations[0];
+                  if (first) setSelectedConvoId(first.id);
+                }
+              }}
+              aria-label="Ver primeira conversa não lida"
+            >
+              <p className="text-sm font-medium text-foreground">
+                {unreadCount === 1
+                  ? '1 conversa com mensagens não lidas'
+                  : `${unreadCount} conversas com mensagens não lidas`}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Clique para ver a primeira
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 shrink-0"
+              aria-label="Fechar aviso"
+              onClick={(e) => {
+                e.stopPropagation();
+                setUnreadBalloonDismissed(true);
+              }}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
+
         {selectedIds.size > 0 && (
           <div className="flex items-center justify-between gap-2 px-4 py-2 border-b bg-muted/50 text-sm">
             <span className="text-muted-foreground">{selectedIds.size} selecionada(s)</span>
@@ -824,7 +1199,7 @@ const ConversationsPage: React.FC = () => {
                 onClick={() => setSelectedConvoId(convo.id)}
                 className={`w-full text-left px-4 py-3 border-b transition-colors hover:bg-muted/50 cursor-pointer flex items-start gap-3 ${
                   selectedConvoId === convo.id ? 'bg-muted' : ''
-                }`}
+                } ${convo.unread_count > 0 ? 'border-l-4 border-l-primary/60 bg-primary/5' : ''}`}
               >
                 <Checkbox
                   checked={selectedIds.has(convo.id)}
@@ -868,7 +1243,7 @@ const ConversationsPage: React.FC = () => {
                         </span>
                       )}
                       {convo.unread_count > 0 && (
-                        <span className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+                        <span className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground animate-pulse">
                           {convo.unread_count}
                         </span>
                       )}
@@ -881,10 +1256,26 @@ const ConversationsPage: React.FC = () => {
       </div>
 
       {/* Chat area + Contact sidebar */}
-      <div className="flex-1 flex min-w-0">
-        <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex min-w-0 relative">
+        <div className="flex-1 flex flex-col min-w-0 relative">
         {selectedConvo ? (
           <>
+            {/* Ícone flutuante — alternar painel de detalhes do contato */}
+            {selectedConvo.contacts && (
+              <Button
+                variant="secondary"
+                size="icon"
+                className="hidden lg:flex absolute right-4 top-1/2 -translate-y-1/2 z-10 h-11 w-11 rounded-full shadow-lg border bg-card hover:bg-muted transition-all hover:scale-105"
+                onClick={() => setContactSidebarOpen((o) => !o)}
+                title={contactSidebarOpen ? 'Recolher detalhes do contato' : 'Ver detalhes do contato'}
+              >
+                {contactSidebarOpen ? (
+                  <PanelRightClose className="h-5 w-5" />
+                ) : (
+                  <User className="h-5 w-5" />
+                )}
+              </Button>
+            )}
             {/* Cabeçalho (caixa, estado, prioridade, atribuição — modelo Chatwoot) */}
             <div className="border-b bg-card px-4 py-3 space-y-3">
               <div className="flex items-start justify-between gap-2">
@@ -1133,6 +1524,16 @@ const ConversationsPage: React.FC = () => {
                               </a>
                             );
                           }
+                          if (a.url && (a.mime_type?.startsWith('audio/') || msg.content_type === 'audio')) {
+                            return (
+                              <audio
+                                key={idx}
+                                controls
+                                src={a.url}
+                                className="max-w-full h-10"
+                              />
+                            );
+                          }
                           if (a.url) {
                             return (
                               <a
@@ -1213,7 +1614,9 @@ const ConversationsPage: React.FC = () => {
                   placeholder={
                     noteMode
                       ? 'Nota interna — não é enviada ao contacto; só a equipa vê no histórico.'
-                      : 'Escreva a resposta ao contacto. Nova linha: Enter. Enviar: botão ou atalho na barra abaixo.'
+                      : composerModKey === 'enter'
+                        ? 'Escreva a resposta. Enter para enviar. Shift+Enter para nova linha.'
+                        : 'Escreva a resposta. Cmd/Ctrl+Enter para enviar.'
                   }
                   rows={3}
                   className="min-h-[88px] max-h-[220px] resize-none border-0 bg-transparent px-3 py-2.5 text-sm leading-relaxed shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
@@ -1235,10 +1638,38 @@ const ConversationsPage: React.FC = () => {
                     >
                       <Paperclip className="h-4 w-4" />
                     </Button>
+                    {!noteMode && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className={`h-8 w-8 shrink-0 ${isRecordingAudio ? 'text-destructive animate-pulse' : 'text-muted-foreground'}`}
+                        title={isRecordingAudio ? 'Parar gravação' : 'Gravar áudio'}
+                        onClick={isRecordingAudio ? stopRecordingAudio : startRecordingAudio}
+                      >
+                        {isRecordingAudio ? (
+                          <Square className="h-4 w-4 fill-current" />
+                        ) : (
+                          <Mic className="h-4 w-4" />
+                        )}
+                      </Button>
+                    )}
+                    {!noteMode && isWhatsAppCloud && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 text-muted-foreground"
+                        title="Enviar template WhatsApp"
+                        onClick={() => setTemplateDialogOpen(true)}
+                      >
+                        <FileText className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 sm:gap-3">
                     <span className="hidden text-[10px] text-muted-foreground sm:inline">
-                      {composerModKey}+Enter para enviar
+                      {composerModKey === 'enter' ? 'Enter para enviar' : 'Ctrl+Enter para enviar'}
                     </span>
                     <span className="text-[10px] text-muted-foreground tabular-nums">
                       {messageText.length}
@@ -1256,6 +1687,60 @@ const ConversationsPage: React.FC = () => {
                 </div>
               </div>
             </form>
+
+            {/* Dialog template WhatsApp Cloud */}
+            <Dialog open={templateDialogOpen} onOpenChange={(open) => { setTemplateDialogOpen(open); if (!open) setTemplateForm({ name: '', language: 'en', bodyParams: '' }); }}>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Enviar template WhatsApp</DialogTitle>
+                  <DialogDescription>
+                    Envie uma mensagem template (24h após última mensagem do contacto). Nome do template conforme aprovado no Meta Business.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="template-name">Nome do template</Label>
+                    <Input
+                      id="template-name"
+                      placeholder="ex: hello_world ou confirmacao_pedido"
+                      value={templateForm.name}
+                      onChange={(e) => setTemplateForm((f) => ({ ...f, name: e.target.value }))}
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="template-lang">Código do idioma</Label>
+                    <Input
+                      id="template-lang"
+                      placeholder="en ou pt_BR"
+                      value={templateForm.language}
+                      onChange={(e) => setTemplateForm((f) => ({ ...f, language: e.target.value }))}
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="template-params">Parâmetros do body (um por linha)</Label>
+                    <Textarea
+                      id="template-params"
+                      placeholder={'Parâmetro 1\nParâmetro 2'}
+                      value={templateForm.bodyParams}
+                      onChange={(e) => setTemplateForm((f) => ({ ...f, bodyParams: e.target.value }))}
+                      rows={3}
+                      className="mt-1 font-mono text-sm"
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setTemplateDialogOpen(false)}>Cancelar</Button>
+                  <Button
+                    onClick={() => sendTemplateMutation.mutate()}
+                    disabled={!templateForm.name.trim() || sendTemplateMutation.isPending}
+                  >
+                    Enviar template
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground">
@@ -1266,55 +1751,25 @@ const ConversationsPage: React.FC = () => {
         )}
         </div>
 
-        {/* Contact sidebar — colapsável */}
+        {/* Contact sidebar — colapsável (toggle via ícone flutuante) */}
         {selectedConvo?.contacts && (
           <div
-            className={`hidden lg:flex shrink-0 flex-col border-l bg-card overflow-y-auto transition-[width] ${
-              contactSidebarOpen ? 'w-72' : 'w-14'
+            className={`hidden lg:flex shrink-0 flex-col border-l bg-card overflow-y-auto transition-[width] duration-200 ${
+              contactSidebarOpen ? 'w-72' : 'w-0 overflow-hidden'
             }`}
           >
-            <div
-              className={`flex items-center gap-2 min-h-[52px] ${
-                contactSidebarOpen ? 'p-4 border-b justify-between' : 'p-2 justify-center'
-              }`}
-            >
-              {contactSidebarOpen ? (
-                <>
-                  <h3 className="text-sm font-semibold">Contatos</h3>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 shrink-0"
-                    onClick={() => setContactSidebarOpen(false)}
-                    title="Recolher painel"
-                  >
-                    <PanelRightClose className="h-4 w-4" />
-                  </Button>
-                </>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 shrink-0"
-                  onClick={() => setContactSidebarOpen(true)}
-                  title="Expandir painel de contatos"
-                >
-                  <PanelRightOpen className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-
             {contactSidebarOpen && (
             <>
-            <div className="p-4 border-b">
+            {/* Detalhes do contato — estilo Chatwoot */}
+            <div className="p-4 border-b space-y-3">
               <div className="flex flex-col items-center gap-3">
                 <div className="relative">
-                  <div className="flex h-20 w-20 items-center justify-center rounded-full bg-muted overflow-hidden shrink-0">
+                  <div className="flex h-20 w-20 items-center justify-center rounded-full bg-muted overflow-hidden shrink-0 ring-2 ring-border">
                     {contactAvatar ? (
                       <img src={contactAvatar} alt="" className="h-full w-full object-cover" />
                     ) : (
-                      <span className="text-2xl font-medium text-muted-foreground">
-                        {selectedConvo.contacts.name?.charAt(0)?.toUpperCase() || <User className="h-8 w-8" />}
+                      <span className="text-2xl font-semibold text-muted-foreground">
+                        {selectedConvo.contacts.name?.charAt(0)?.toUpperCase() ?? <User className="h-10 w-10" />}
                       </span>
                     )}
                   </div>
@@ -1323,121 +1778,412 @@ const ConversationsPage: React.FC = () => {
                       type="button"
                       variant="secondary"
                       size="icon"
-                      className="absolute -bottom-1 -right-1 h-7 w-7 rounded-full"
+                      className="absolute -bottom-0.5 -right-0.5 h-6 w-6 rounded-full shadow"
                       onClick={async () => {
                         try {
                           const { data, isError } = await refetchProfile();
                           queryClient.invalidateQueries({ queryKey: ['conversations'] });
                           if (isError) return;
-                          if (data?.profilePictureUrl) toast.success('Foto do WhatsApp atualizada');
-                          else toast.info('Contato sem foto de perfil no WhatsApp');
+                          if (data?.profilePictureUrl) toast.success('Foto atualizada');
+                          else toast.info('Sem foto no WhatsApp');
                         } catch {
-                          toast.error('Falha ao verificar contato');
+                          toast.error('Falha ao verificar');
                         }
                       }}
                       disabled={profileLoading}
-                      title="Verificar contato (atualizar foto WhatsApp)"
+                      title="Atualizar foto WhatsApp"
                     >
-                      <RefreshCw className={`h-3.5 w-3.5 ${profileLoading ? 'animate-spin' : ''}`} />
+                      <RefreshCw className={`h-3 w-3 ${profileLoading ? 'animate-spin' : ''}`} />
                     </Button>
                   )}
                 </div>
-                <div className="w-full text-center">
-                  <p className="font-medium truncate">{selectedConvo.contacts.name || '—'}</p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">Indisponível</p>
+                <div className="w-full text-center space-y-1">
+                  <div className="flex items-center justify-center gap-1">
+                    <p className="font-semibold text-sm truncate">{selectedConvo.contacts.name || 'Sem nome'}</p>
+                    <Link to={`/contacts?id=${selectedConvo.contacts.id}`} className="text-muted-foreground hover:text-foreground" title="Ver contato">
+                      <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                    </Link>
+                  </div>
+                  <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    <div
+                      className="flex items-center justify-center gap-2 cursor-pointer hover:text-foreground"
+                      onClick={() => selectedConvo.contacts.email && copyToClipboard('email', selectedConvo.contacts.email)}
+                      title={selectedConvo.contacts.email ? 'Clique para copiar' : undefined}
+                    >
+                      <Mail className="h-3 w-3 shrink-0" />
+                      {selectedConvo.contacts.email ? (
+                        <span className="truncate">{selectedConvo.contacts.email}</span>
+                      ) : (
+                        <span>Indisponível</span>
+                      )}
+                      {selectedConvo.contacts.email && (copiedField === 'email' ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />)}
+                    </div>
+                    <div
+                      className="flex items-center justify-center gap-2 cursor-pointer hover:text-foreground"
+                      onClick={() => (selectedConvo.contacts.phone || waId) && copyToClipboard('phone', selectedConvo.contacts.phone || waId || '')}
+                      title={selectedConvo.contacts.phone || waId ? 'Clique para copiar' : undefined}
+                    >
+                      <Phone className="h-3 w-3 shrink-0" />
+                      {selectedConvo.contacts.phone || waId ? (
+                        <span className="font-mono truncate">{selectedConvo.contacts.phone || waId}</span>
+                      ) : (
+                        <span>Indisponível</span>
+                      )}
+                      {(selectedConvo.contacts.phone || waId) && (copiedField === 'phone' ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />)}
+                    </div>
+                    <div className="flex items-center justify-center gap-2">
+                      <Building2 className="h-3 w-3 shrink-0" />
+                      <span>{(selectedConvo.contacts as { company?: string })?.company || 'Indisponível'}</span>
+                    </div>
+                  </div>
+                </div>
+                {/* Barra de ações — estilo Chatwoot */}
+                <div className="flex gap-1 w-full justify-center">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9"
+                    onClick={() => {
+                      setNewMessageForm({
+                        contactSearch: selectedConvo?.contacts?.name ?? '',
+                        selectedContactId: selectedConvo?.contact_id ?? null,
+                        channelId: selectedConvo?.channel_id ?? '',
+                        message: '',
+                      });
+                      setNewMessageOpen(true);
+                    }}
+                    title="Nova mensagem"
+                  >
+                    <Mail className="h-4 w-4" />
+                  </Button>
+                  <Link to={`/contacts?id=${selectedConvo.contacts.id}`}>
+                    <Button variant="outline" size="icon" className="h-9 w-9" title="Editar contato">
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  </Link>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 text-destructive hover:text-destructive hover:bg-destructive/10"
+                    onClick={() => setContactDeleteConfirmOpen(true)}
+                    title="Excluir contato"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
               </div>
             </div>
 
-            <div className="flex-1 p-4 space-y-4 text-sm">
-              {selectedConvo.contacts.email && (
-                <div>
-                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">E-mail</p>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate">{selectedConvo.contacts.email}</span>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 shrink-0"
-                      onClick={() => copyToClipboard('email', selectedConvo.contacts.email)}
-                    >
-                      {copiedField === 'email' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                    </Button>
-                  </div>
-                </div>
-              )}
-              {selectedConvo.contacts.phone && (
-                <div>
-                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Telefone</p>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate font-mono">{selectedConvo.contacts.phone}</span>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 shrink-0"
-                      onClick={() => copyToClipboard('phone', selectedConvo.contacts.phone)}
-                    >
-                      {copiedField === 'phone' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                    </Button>
-                  </div>
-                </div>
-              )}
-              {waId && (
-                <div>
-                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">WhatsApp ID</p>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate font-mono text-xs">{waId}</span>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 shrink-0"
-                      onClick={() => copyToClipboard('wa', waId)}
-                    >
-                      {copiedField === 'wa' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                    </Button>
-                  </div>
-                </div>
-              )}
+            {/* Seções em accordion */}
+            <div className="flex-1 overflow-y-auto">
+              <Accordion type="multiple" defaultValue={['conversation-actions', 'macros', 'contact-attributes', 'contact-notes']} className="px-2">
+                {/* Ações da conversa */}
+                <AccordionItem value="conversation-actions">
+                  <AccordionTrigger className="text-sm py-3">Ações da conversa</AccordionTrigger>
+                  <AccordionContent className="space-y-3 text-sm">
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Agente atribuído</Label>
+                      <Select
+                        value={selectedConvo.assignee_id ?? 'none'}
+                        onValueChange={(v) => patchConversation.mutate({ id: selectedConvo.id, patch: { assignee_id: v === 'none' ? null : v } })}
+                      >
+                        <SelectTrigger className="h-9 mt-1">
+                          <SelectValue placeholder="Nenhum" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Nenhum</SelectItem>
+                          {orgMembers.map((m: any) => (
+                            <SelectItem key={m.id} value={m.id}>{m.display_name || m.id?.slice(0, 8)}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Time atribuído</Label>
+                      <Select
+                        value={selectedConvo.team_id ?? 'none'}
+                        onValueChange={(v) => patchConversation.mutate({ id: selectedConvo.id, patch: { team_id: v === 'none' ? null : v } })}
+                      >
+                        <SelectTrigger className="h-9 mt-1">
+                          <SelectValue placeholder="Nenhum" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Nenhum</SelectItem>
+                          {teams.map((t: any) => (
+                            <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Prioridade</Label>
+                      <Select
+                        value={selectedConvo.priority ?? 'none'}
+                        onValueChange={(v) => patchConversation.mutate({ id: selectedConvo.id, patch: { priority: v } })}
+                      >
+                        <SelectTrigger className="h-9 mt-1">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(Object.entries(PRIORITY_LABELS) as [string, string][]).map(([k, label]) => (
+                            <SelectItem key={k} value={k}>{label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Etiquetas da conversa</Label>
+                      <Popover open={addLabelsOpen} onOpenChange={setAddLabelsOpen}>
+                        <PopoverTrigger asChild>
+                          <Button variant="outline" size="sm" className="w-full mt-1 justify-start gap-2">
+                            <Tag className="h-3.5 w-3.5" />
+                            + Adicionar etiquetas
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent align="start" className="w-56 p-2">
+                          {labels.length === 0 ? (
+                            <p className="text-xs text-muted-foreground py-2">Nenhuma etiqueta configurada</p>
+                          ) : (
+                            <div className="space-y-1 max-h-48 overflow-y-auto">
+                              {labels
+                                .filter((l: any) => !(selectedConvo.tags ?? []).includes(l.name))
+                                .map((l: any) => (
+                                  <Button
+                                    key={l.id}
+                                    variant="ghost"
+                                    size="sm"
+                                    className="w-full justify-start text-xs"
+                                    onClick={() => {
+                                      const next = [...(selectedConvo.tags ?? []), l.name];
+                                      patchConversation.mutate({ id: selectedConvo.id, patch: { tags: next } });
+                                      setAddLabelsOpen(false);
+                                    }}
+                                  >
+                                    <span className="w-2 h-2 rounded-full mr-2 shrink-0" style={{ backgroundColor: l.color || '#3B82F6' }} />
+                                    {l.name}
+                                  </Button>
+                                ))}
+                              {(selectedConvo.tags ?? []).length > 0 && (
+                                <div className="flex flex-wrap gap-1 pt-2 border-t mt-2">
+                                  {(selectedConvo.tags as string[]).map((tag) => (
+                                    <Badge key={tag} variant="secondary" className="text-[10px]">
+                                      {tag}
+                                      <button
+                                        type="button"
+                                        className="ml-1 hover:text-destructive"
+                                        onClick={() => {
+                                          const next = (selectedConvo.tags ?? []).filter((t: string) => t !== tag);
+                                          patchConversation.mutate({ id: selectedConvo.id, patch: { tags: next } });
+                                        }}
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </button>
+                                    </Badge>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </PopoverContent>
+                      </Popover>
+                      {(selectedConvo.tags?.length ?? 0) > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {(selectedConvo.tags as string[]).map((tag) => (
+                            <Badge key={tag} variant="secondary" className="text-[10px]">{tag}</Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
 
-              {(selectedConvo.tags?.length ?? 0) > 0 && (
-                <div>
-                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-2">Etiquetas</p>
-                  <div className="flex flex-wrap gap-1">
-                    {(selectedConvo.tags as string[]).map((tag) => (
-                      <Badge key={tag} variant="secondary" className="text-[10px]">
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {(selectedConvo.contacts as { custom_fields?: Record<string, unknown> })?.custom_fields &&
-                Object.keys((selectedConvo.contacts.custom_fields as Record<string, unknown>) ?? {}).length > 0 && (
-                <div>
-                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-2">Atributos do contato</p>
-                  <div className="space-y-1.5 text-xs">
-                    {Object.entries(
-                      (selectedConvo.contacts.custom_fields as Record<string, unknown>) ?? {}
-                    ).map(([k, v]) => (
-                      <div key={k} className="flex justify-between gap-2">
-                        <span className="text-muted-foreground">{k}</span>
-                        <span className="truncate">{String(v ?? '')}</span>
+                {/* Macros */}
+                <AccordionItem value="macros">
+                  <AccordionTrigger className="text-sm py-3">Macros</AccordionTrigger>
+                  <AccordionContent>
+                    {(macros as { id: string; name: string; visibility?: string; created_by?: string }[])
+                      .filter((m) => m.visibility !== 'private' || m.created_by === currentMember?.user_id)
+                      .length === 0 ? (
+                      <p className="text-xs text-muted-foreground">Nenhuma macro disponível</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {(macros as { id: string; name: string; visibility?: string; created_by?: string }[])
+                          .filter((m) => m.visibility !== 'private' || m.created_by === currentMember?.user_id)
+                          .map((m) => (
+                            <div key={m.id} className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2 bg-muted/30 hover:bg-muted/50 transition-colors">
+                              <span className="text-xs truncate">{m.name}</span>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 shrink-0"
+                                onClick={() => executeMacro(m.id)}
+                                disabled={executingMacroId === m.id}
+                                title="Executar macro"
+                              >
+                                <Play className={`h-3.5 w-3.5 ${executingMacroId === m.id ? 'animate-pulse' : ''}`} />
+                              </Button>
+                            </div>
+                          ))}
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {(!selectedConvo.contacts?.custom_fields ||
-                Object.keys((selectedConvo.contacts.custom_fields as Record<string, unknown>) ?? {}).length === 0) && (
-                <div>
-                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-2">Atributos do contato</p>
-                  <p className="text-xs text-muted-foreground">Nenhum atributo encontrado</p>
-                </div>
-              )}
+                    )}
+                  </AccordionContent>
+                </AccordionItem>
+
+                {/* Informação da conversa */}
+                <AccordionItem value="conversation-info">
+                  <AccordionTrigger className="text-sm py-3">Informação da conversa</AccordionTrigger>
+                  <AccordionContent>
+                    <div className="space-y-2 text-xs text-muted-foreground">
+                      {selectedConvo.channels && (
+                        <p>Canal: {selectedConvo.channels.name || channelLabels[selectedConvo.channels.channel_type] || selectedConvo.channels.channel_type}</p>
+                      )}
+                      <p>Criada em {new Date(selectedConvo.created_at).toLocaleString('pt-BR')}</p>
+                      <p>Status: {STATUS_LABELS[selectedConvo.status] ?? selectedConvo.status}</p>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+
+                {/* Atributos do contato */}
+                <AccordionItem value="contact-attributes">
+                  <AccordionTrigger className="text-sm py-3">Atributos do contato</AccordionTrigger>
+                  <AccordionContent>
+                    {(selectedConvo.contacts as { custom_fields?: Record<string, unknown> })?.custom_fields &&
+                    Object.keys((selectedConvo.contacts.custom_fields as Record<string, unknown>) ?? {}).length > 0 ? (
+                      <div className="space-y-2 text-xs">
+                        {Object.entries((selectedConvo.contacts.custom_fields as Record<string, unknown>) ?? {}).map(([k, v]) => (
+                          <div key={k} className="flex justify-between gap-3 py-1 border-b border-dashed last:border-0">
+                            <span className="text-muted-foreground">{k}</span>
+                            <span className="truncate text-right">{String(v ?? '')}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Nenhum atributo encontrado</p>
+                    )}
+                  </AccordionContent>
+                </AccordionItem>
+
+                {/* Notas do contato */}
+                <AccordionItem value="contact-notes">
+                  <AccordionTrigger className="text-sm py-3">Notas do contato</AccordionTrigger>
+                  <AccordionContent>
+                    {(selectedConvo.contacts as { notes?: string })?.notes ? (
+                      <p className="text-xs whitespace-pre-wrap mb-2">{(selectedConvo.contacts as { notes?: string }).notes}</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground mb-2">Ainda não há notas. Use o botão abaixo para criar uma.</p>
+                    )}
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="h-auto p-0 text-primary text-xs"
+                      onClick={() => {
+                        setContactNoteText((selectedConvo.contacts as { notes?: string })?.notes ?? '');
+                        setContactNoteEditOpen(true);
+                      }}
+                    >
+                      <Plus className="h-3.5 w-3.5 mr-1" />
+                      Adicionar nota de contato
+                    </Button>
+                  </AccordionContent>
+                </AccordionItem>
+
+                {/* Conversas anteriores */}
+                {previousConversations.length > 0 && (
+                  <AccordionItem value="previous-conversations">
+                    <AccordionTrigger className="text-sm py-3">Conversas anteriores</AccordionTrigger>
+                    <AccordionContent>
+                      <div className="space-y-2">
+                        {previousConversations.map((pc: any) => (
+                          <button
+                            key={pc.id}
+                            type="button"
+                            className="w-full text-left flex items-start gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors"
+                            onClick={() => setSelectedConvoId(pc.id)}
+                          >
+                            <Mail className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-medium truncate">{pc.subject || 'Conversa'}</p>
+                              <p className="text-[10px] text-muted-foreground">
+                                {pc.channels?.channel_type && channelLabels[pc.channels.channel_type]} • {pc.last_message_at ? new Date(pc.last_message_at).toLocaleDateString('pt-BR') : ''}
+                              </p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                )}
+
+                {/* Participantes da conversa */}
+                <AccordionItem value="participants">
+                  <AccordionTrigger className="text-sm py-3">Participantes da conversa</AccordionTrigger>
+                  <AccordionContent>
+                    <p className="text-xs text-muted-foreground">
+                      {selectedConvo.assignee_id ? '1 agente atribuído.' : 'Nenhum agente atribuído.'}
+                    </p>
+                    {selectedConvo.assignee && (
+                      <div className="flex items-center gap-2 mt-2">
+                        <div className="flex h-6 w-6 rounded-full bg-primary/10 items-center justify-center text-[10px] font-medium">
+                          {selectedConvo.assignee.display_name?.charAt(0) || '?'}
+                        </div>
+                        <span className="text-xs">{selectedConvo.assignee.display_name}</span>
+                        {selectedConvo.assignee_id === currentMember?.id && (
+                          <span className="text-[10px] text-muted-foreground">(você)</span>
+                        )}
+                      </div>
+                    )}
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
             </div>
             </>
             )}
+
+            {/* Dialog editar nota do contato */}
+            <Dialog open={contactNoteEditOpen} onOpenChange={(open) => { setContactNoteEditOpen(open); if (!open) setContactNoteText(''); }}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Nota do contato</DialogTitle>
+                  <DialogDescription>Informações visíveis apenas à equipa.</DialogDescription>
+                </DialogHeader>
+                <Textarea
+                  rows={4}
+                  value={contactNoteText}
+                  onChange={(e) => setContactNoteText(e.target.value)}
+                  placeholder="Adicione uma nota sobre este contato..."
+                />
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setContactNoteEditOpen(false)}>Cancelar</Button>
+                  <Button
+                    onClick={() => selectedConvo?.contacts?.id && updateContactNotes.mutate({ contactId: selectedConvo.contacts.id, notes: contactNoteText })}
+                    disabled={updateContactNotes.isPending}
+                  >
+                    Salvar
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            {/* Dialog confirmar exclusão do contato */}
+            <AlertDialog open={contactDeleteConfirmOpen} onOpenChange={setContactDeleteConfirmOpen}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Excluir contato e histórico</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Tem certeza que deseja excluir <strong>{selectedConvo?.contacts?.name || 'este contato'}</strong>? Todas as conversas e o histórico de mensagens serão removidos permanentemente. Esta ação não pode ser desfeita.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                  <AlertDialogAction
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    onClick={() => selectedConvo?.contacts?.id && deleteContactMutation.mutate(selectedConvo.contacts.id)}
+                  >
+                    Excluir
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         )}
       </div>
