@@ -45,7 +45,14 @@ O Compose **não** usa mais `${VAR:?}` nos build args (isso falhava no Easypanel
 2. Nomes **idênticos** aos do ficheiro (maiúsculas e prefixo `VITE_`).
 3. Referência de nomes: **`deploy/easypanel.env.example`**.
 
-Sem estes valores, o build pode concluir mas o frontend fica sem API — confirme sempre após o primeiro deploy.
+### Página em branco / “não mostra nada” após deploy
+
+O Vite **embuti** estas variáveis **no momento do `docker build`** (`npm run build`). Se só existirem no runtime do container **depois** do build, o bundle continua **sem** URL/chave — o login não aparece ou vê-se o ecrã **Configuração do Supabase em falta** (a partir deste repositório).
+
+- Garanta que o Easypanel passa `VITE_*` ao **build** do Compose (às vezes há opção “Build arguments” / variáveis disponíveis para **build** e não só **run**).
+- Depois de definir ou corrigir variáveis: **rebuild** (não basta reiniciar o container).
+
+Sem estes valores no build, o deploy conclui mas o SPA não liga ao Supabase.
 
 ## 0c. Aviso "ports is used in web" / conflito de portas
 
