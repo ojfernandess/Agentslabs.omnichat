@@ -1,18 +1,19 @@
-# Frontend + Nginx. O Postgres/Auth/Storage continuam no Supabase (cloud ou self-hosted).
-# Migrações: use GitHub Actions (supabase db push) ou `supabase db push` localmente.
+# Ficheiro padrão: `docker compose up` local e Easypanel (usa este nome: docker-compose.yml).
+# Build: context = raiz do repo → ./Dockerfile (obrigatório existir).
 #
-# Uso:
-#   cp .env.example .env   # preencher VITE_*
-#   docker compose up -d --build
+# Easypanel: não altere para outro path sem copiar também o Dockerfile para o contexto.
+# Repositório: https://github.com/ojfernandess/Agentslabs.omnichat
 #
+# Ver: deploy/EASYPANEL_GITHUB.md, docker-compose.easypanel.yml (cópia equivalente)
+
 services:
   web:
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:?defina no .env}
-        VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:?defina no .env}
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
+        VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:-}
         VITE_SUPABASE_FUNCTIONS_URL: ${VITE_SUPABASE_FUNCTIONS_URL:-}
         VITE_DEPLOYMENT_MODE: ${VITE_DEPLOYMENT_MODE:-supabase}
         META_APP_ID: ${META_APP_ID:-}
@@ -22,4 +23,22 @@ services:
         VITE_EXTERNAL_MEDIA_UPLOAD_URL: ${VITE_EXTERNAL_MEDIA_UPLOAD_URL:-}
     ports:
       - "${WEB_PORT:-8080}:80"
+    labels:
+      org.opencontainers.image.source: "https://github.com/ojfernandess/Agentslabs.omnichat"
+      org.opencontainers.image.title: "Agentslabs Omni Chat"
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  db-init:
+    profiles:
+      - migrate
+    build:
+      context: .
+      dockerfile: Dockerfile.db-init
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-}
+    restart: "no"

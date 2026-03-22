@@ -1,11 +1,8 @@
-# Versão para Easypanel / CI: ficheiro na RAIZ do repositório.
-# context: . → encontra ./Dockerfile (o compose em deploy/ usa context: .. e falha se o painel não mantiver a pasta deploy/).
-#
-# No Easypanel: Compose file path = docker-compose.easypanel.yml (raiz do clone), não deploy/docker-compose.easypanel.yml
+# Opcional: como docker-compose.yml, com VITE_DEPLOYMENT_MODE default = easypanel.
+# O painel usa por defeito docker-compose.yml (na raiz) — já com context . e Dockerfile corretos.
 #
 # Repositório: https://github.com/ojfernandess/Agentslabs.omnichat
-#
-# Ver também: deploy/EASYPANEL_GITHUB.md, deploy/easypanel.env.example
+# Ver: deploy/EASYPANEL_GITHUB.md, deploy/easypanel.env.example
 
 services:
   web:

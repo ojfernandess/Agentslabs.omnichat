@@ -3,9 +3,9 @@
 ## Quick start (apenas frontend → Supabase Cloud)
 
 ```bash
-cd ..
-docker compose -f deploy/docker-compose.yml build
-docker compose -f deploy/docker-compose.yml up -d
+cd ..   # raiz do repositório
+docker compose build
+docker compose up -d
 ```
 
 Abra `http://localhost:${WEB_PORT:-8080}` e configure `.env` com `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY`.
@@ -16,7 +16,8 @@ Abra `http://localhost:${WEB_PORT:-8080}` e configure `.env` com `VITE_SUPABASE_
 |----------|-----|
 | `Dockerfile` | Build multi-stage: Node → Nginx com SPA |
 | `nginx.conf` | SPA fallback + gzip |
-| `docker-compose.yml` | Serviço `web` |
+| `docker-compose.yml` (raiz) | Serviço `web` — padrão Easypanel |
+| `docker-compose.easypanel.yml` (raiz) | Igual à easypanel; `VITE_DEPLOYMENT_MODE` default `easypanel` |
 | `docker-compose.selfhosted.yml` | Exemplo com variáveis para backend self-hosted |
 | `k8s/web-deployment.yaml` | Deployment + Service + Ingress opcional |
 
