@@ -72,7 +72,23 @@ Se não usar o job `migrate`, aplique SQL com:
 - `supabase db push` local, ou  
 - one-shot `db-init` com `docker compose -f deploy/docker-compose.easypanel.yml --profile migrate` e `DATABASE_URL` (ver comentários no compose).
 
-## 6. Checklist rápido
+## 6. Erro `relation "…" already exists` no `db push`
+
+Significa que o **Postgres já tem as tabelas** (por exemplo criadas antes no Dashboard ou por outro fluxo), mas o **histórico de migrações** do Supabase ainda não tinha essa versão aplicada — o CI tentava criar `organizations` de novo.
+
+**No repositório:** a migração inicial `20260321163200_*.sql` foi tornada **idempotente** (`CREATE TABLE IF NOT EXISTS`, políticas com `DROP POLICY IF EXISTS`, etc.), para o `supabase db push` poder correr mesmo quando o schema já existe.
+
+**Se ainda falhar** (estado inconsistente), marque manualmente migrações como aplicadas (com o CLI linkado ao projeto):
+
+```bash
+supabase migration list
+supabase migration repair --status applied 20260321163200
+# repetir para outras versões já refletidas na base, se necessário
+```
+
+Ou use **Run workflow** com **skip_migrate** e aplique migrações só pelo Dashboard / CLI local.
+
+## 7. Checklist rápido
 
 - [ ] Secrets `VITE_*` preenchidos no GitHub (ou build args no Easypanel se build lá).
 - [ ] Workflow verde em **Actions**.
