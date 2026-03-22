@@ -4,6 +4,7 @@
 
 DROP POLICY IF EXISTS "Super admins can view super_admins" ON public.super_admins;
 DROP POLICY IF EXISTS "Super admins can insert super_admins" ON public.super_admins;
+DROP POLICY IF EXISTS "Users can view own super_admin row" ON public.super_admins;
 
 -- Cada utilizador pode ver apenas a sua própria linha (para useIsSuperAdmin)
 CREATE POLICY "Users can view own super_admin row"
@@ -22,6 +23,7 @@ AS $$
 $$;
 
 -- Apenas super admins podem inserir novos
+DROP POLICY IF EXISTS "Super admins can insert super_admins" ON public.super_admins;
 CREATE POLICY "Super admins can insert super_admins"
   ON public.super_admins FOR INSERT TO authenticated
   WITH CHECK (public.is_super_admin());

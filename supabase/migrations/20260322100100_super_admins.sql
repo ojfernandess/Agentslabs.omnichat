@@ -7,11 +7,13 @@ CREATE TABLE IF NOT EXISTS public.super_admins (
 ALTER TABLE public.super_admins ENABLE ROW LEVEL SECURITY;
 
 -- Apenas super admins podem ver a lista
+DROP POLICY IF EXISTS "Super admins can view super_admins" ON public.super_admins;
 CREATE POLICY "Super admins can view super_admins"
   ON public.super_admins FOR SELECT TO authenticated
   USING (auth.uid() IN (SELECT user_id FROM public.super_admins));
 
 -- Apenas super admins podem inserir novos (adicionar outros super admins)
+DROP POLICY IF EXISTS "Super admins can insert super_admins" ON public.super_admins;
 CREATE POLICY "Super admins can insert super_admins"
   ON public.super_admins FOR INSERT TO authenticated
   WITH CHECK (auth.uid() IN (SELECT user_id FROM public.super_admins));
