@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useOrg } from '@/contexts/OrgContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -32,9 +32,11 @@ import {
   Copy,
   FileText,
   GripVertical,
+  Upload,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { DEFAULT_CSAT_MESSAGE } from '@/lib/csatSettings';
+import { uploadInboxAvatar } from '@/lib/messageAttachmentUpload';
 import { cn } from '@/lib/utils';
 
 const channelLabels: Record<string, string> = {
@@ -106,6 +108,29 @@ const BASE_TABS = [
   { id: 'health', label: 'Saúde da conta', icon: Heart },
 ] as const;
 
+const SectionCard = ({
+  title,
+  description,
+  children,
+  action,
+}: {
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+  action?: React.ReactNode;
+}) => (
+  <div className="rounded-xl border bg-card p-6 space-y-4">
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <h2 className="font-semibold">{title}</h2>
+        {description && <p className="text-sm text-muted-foreground mt-0.5">{description}</p>}
+      </div>
+      {action}
+    </div>
+    {children}
+  </div>
+);
+
 const InboxSettingsPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { currentOrg, currentMember } = useOrg();
@@ -127,6 +152,8 @@ const InboxSettingsPage: React.FC = () => {
       return data;
     },
     enabled: !!id && !!currentOrg,
+    refetchOnWindowFocus: false,
+    staleTime: 60_000,
   });
 
   const { data: helpCategories = [] } = useQuery({
@@ -197,8 +224,10 @@ const InboxSettingsPage: React.FC = () => {
     enabled: !!id && !!channel && activeTab === 'bot',
   });
 
+  const formInitRef = useRef<string | null>(null);
   const [form, setForm] = useState({
     name: '',
+    avatar_url: '' as string,
     greeting_enabled: false,
     welcome_message: '',
     help_center_category_id: '' as string,
@@ -246,10 +275,15 @@ const InboxSettingsPage: React.FC = () => {
   });
 
   useEffect(() => {
-    if (!channel) return;
+    if (!channel?.id) return;
+    if (formInitRef.current === channel.id) return;
+    formInitRef.current = channel.id;
     const cfg = (channel.config ?? {}) as Record<string, unknown>;
+    const widget = (cfg.widget ?? {}) as Record<string, unknown>;
+    const avatarUrl = (widget.avatar_url as string) ?? (cfg.avatar_url as string) ?? '';
     setForm({
       name: channel.name ?? '',
+      avatar_url: avatarUrl,
       greeting_enabled: !!cfg.welcome_message,
       welcome_message: (cfg.welcome_message as string) ?? '',
       help_center_category_id: (cfg.help_center_category_id as string) ?? '',
@@ -274,7 +308,11 @@ const InboxSettingsPage: React.FC = () => {
       enabled: !!(csat.enabled as boolean),
       message: (csat.message as string) || DEFAULT_CSAT_MESSAGE,
     });
-  }, [channel]);
+  }, [channel?.id]);
+
+  useEffect(() => {
+    formInitRef.current = null;
+  }, [id]);
 
   useEffect(() => {
     if (linkedBot !== undefined) setSelectedBotId(linkedBot);
@@ -306,7 +344,7 @@ const InboxSettingsPage: React.FC = () => {
       unavailable_message:
         (widget.unavailable_message as string) ?? (widget.unavailableMessage as string) ?? 'Estamos offline. Deixe uma mensagem.',
     });
-  }, [channel]);
+  }, [channel?.id]);
 
   useEffect(() => {
     if (!channel || channel.channel_type !== 'livechat') return;
@@ -330,7 +368,7 @@ const InboxSettingsPage: React.FC = () => {
       message: (prechat.message as string) ?? 'Preencha as informações abaixo, para iniciar seu atendimento.',
       fields,
     });
-  }, [channel]);
+  }, [channel?.id]);
 
   const updateChannel = useMutation({
     mutationFn: async (payload: {
@@ -362,16 +400,32 @@ const InboxSettingsPage: React.FC = () => {
   const saveSettings = () => {
     if (!channel?.id) return;
     const cfg = getBaseConfig();
-    updateChannel.mutate({
-      name: form.name.trim(),
-      is_active: form.is_active,
-      config: {
-        ...cfg,
-        welcome_message: form.greeting_enabled ? form.welcome_message || undefined : undefined,
-        help_center_category_id: form.help_center_category_id || undefined,
-        lock_to_single_conversation: form.lock_to_single_conversation,
+    const widget = (cfg.widget ?? {}) as Record<string, unknown>;
+    const mergedConfig: Record<string, unknown> = {
+      ...cfg,
+      welcome_message: form.greeting_enabled ? form.welcome_message || undefined : undefined,
+      help_center_category_id: form.help_center_category_id || undefined,
+      lock_to_single_conversation: form.lock_to_single_conversation,
+    };
+    if (channel.channel_type === 'livechat') {
+      mergedConfig.widget = { ...widget, avatar_url: form.avatar_url || undefined };
+    } else {
+      mergedConfig.avatar_url = form.avatar_url || undefined;
+    }
+    updateChannel.mutate(
+      {
+        name: form.name.trim(),
+        is_active: form.is_active,
+        config: mergedConfig,
       },
-    });
+      {
+        onSuccess: () => {
+          if (channel.channel_type === 'livechat') {
+            setWidgetForm((prev) => ({ ...prev, avatar_url: form.avatar_url }));
+          }
+        },
+      }
+    );
   };
 
   const saveAdvanced = () => {
@@ -440,29 +494,36 @@ const InboxSettingsPage: React.FC = () => {
     const cfg = getBaseConfig();
     const existingWidget = (cfg.widget ?? {}) as Record<string, unknown>;
     const existingPrechat = (existingWidget.prechat ?? {}) as Record<string, unknown>;
-    updateChannel.mutate({
-      config: {
-        ...cfg,
-        welcome_message: widgetForm.welcome_description || undefined,
-        widget: {
-          ...existingWidget,
-          site_name: widgetForm.site_name || undefined,
-          welcome_title: widgetForm.welcome_title || undefined,
-          welcome_description: widgetForm.welcome_description || undefined,
-          response_time: widgetForm.response_time,
-          widget_color: widgetForm.widget_color,
-          primary_color: widgetForm.widget_color,
-          position: widgetForm.position === 'left' ? 'left' : 'right',
-          type: widgetForm.type,
-          launcher_title: widgetForm.launcher_title || undefined,
-          launcherTitle: widgetForm.launcher_title || undefined,
-          avatar_url: widgetForm.avatar_url || undefined,
-          available_message: widgetForm.available_message || undefined,
-          unavailable_message: widgetForm.unavailable_message || undefined,
-          prechat: existingPrechat,
+    updateChannel.mutate(
+      {
+        config: {
+          ...cfg,
+          welcome_message: widgetForm.welcome_description || undefined,
+          widget: {
+            ...existingWidget,
+            site_name: widgetForm.site_name || undefined,
+            welcome_title: widgetForm.welcome_title || undefined,
+            welcome_description: widgetForm.welcome_description || undefined,
+            response_time: widgetForm.response_time,
+            widget_color: widgetForm.widget_color,
+            primary_color: widgetForm.widget_color,
+            position: widgetForm.position === 'left' ? 'left' : 'right',
+            type: widgetForm.type,
+            launcher_title: widgetForm.launcher_title || undefined,
+            launcherTitle: widgetForm.launcher_title || undefined,
+            avatar_url: widgetForm.avatar_url || undefined,
+            available_message: widgetForm.available_message || undefined,
+            unavailable_message: widgetForm.unavailable_message || undefined,
+            prechat: existingPrechat,
+          },
         },
       },
-    });
+      {
+        onSuccess: () => {
+          setForm((prev) => ({ ...prev, avatar_url: widgetForm.avatar_url }));
+        },
+      }
+    );
   };
 
   const saveBot = useMutation({
@@ -613,29 +674,6 @@ const InboxSettingsPage: React.FC = () => {
     );
   }
 
-  const SectionCard = ({
-    title,
-    description,
-    children,
-    action,
-  }: {
-    title: string;
-    description?: string;
-    children: React.ReactNode;
-    action?: React.ReactNode;
-  }) => (
-    <div className="rounded-xl border bg-card p-6 space-y-4">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="font-semibold">{title}</h2>
-          {description && <p className="text-sm text-muted-foreground mt-0.5">{description}</p>}
-        </div>
-        {action}
-      </div>
-      {children}
-    </div>
-  );
-
   return (
     <div className="h-full flex flex-col lg:flex-row">
       <aside className="w-full lg:w-52 shrink-0 border-b lg:border-b-0 lg:border-r bg-muted/30">
@@ -705,10 +743,65 @@ const InboxSettingsPage: React.FC = () => {
                 }
               >
                 <div className="flex items-center gap-4 mb-6">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
-                    <Hash className="h-7 w-7 text-muted-foreground" />
+                  <div
+                    className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-2 border-dashed bg-muted overflow-hidden"
+                    style={{ borderColor: 'var(--primary)' }}
+                  >
+                    {form.avatar_url ? (
+                      <img
+                        src={form.avatar_url}
+                        alt=""
+                        className="h-12 w-12 rounded-full object-cover"
+                      />
+                    ) : (
+                      <Hash className="h-7 w-7 text-muted-foreground" />
+                    )}
                   </div>
-                  <div className="text-sm text-muted-foreground">Imagem do Canal</div>
+                  <div className="space-y-2 flex-1 min-w-0">
+                    <Label>Imagem do canal</Label>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/gif,image/webp"
+                        className="hidden"
+                        id="inbox-avatar-settings-upload"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          e.target.value = '';
+                          if (!file || !channel?.id || !currentOrg?.id || !canEdit) return;
+                          try {
+                            const url = await uploadInboxAvatar(currentOrg.id, channel.id, file);
+                            setForm((prev) => ({ ...prev, avatar_url: url }));
+                            toast.success('Imagem carregada');
+                          } catch (err) {
+                            toast.error(err instanceof Error ? err.message : 'Erro ao carregar');
+                          }
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0"
+                        disabled={!canEdit}
+                        onClick={() => document.getElementById('inbox-avatar-settings-upload')?.click()}
+                      >
+                        <Upload className="h-4 w-4 mr-1.5" />
+                        Carregar imagem
+                      </Button>
+                      <span className="hidden sm:inline self-center text-muted-foreground text-sm">ou</span>
+                      <Input
+                        placeholder="Inserir URL da imagem"
+                        value={form.avatar_url}
+                        onChange={(e) => setForm((prev) => ({ ...prev, avatar_url: e.target.value }))}
+                        disabled={!canEdit}
+                        className="flex-1 min-w-0"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Carregue uma imagem (PNG, JPG, GIF, WebP até 2 MB) ou cole o link
+                    </p>
+                  </div>
                 </div>
 
                 <div className="space-y-4">
@@ -717,7 +810,7 @@ const InboxSettingsPage: React.FC = () => {
                     <Input
                       id="inbox-name"
                       value={form.name}
-                      onChange={(e) => setForm({ ...form, name: e.target.value })}
+                      onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
                       placeholder="Nome da caixa"
                       disabled={!canEdit}
                     />
@@ -733,7 +826,7 @@ const InboxSettingsPage: React.FC = () => {
                     </div>
                     <Switch
                       checked={form.is_active}
-                      onCheckedChange={(v) => setForm({ ...form, is_active: v })}
+                      onCheckedChange={(v) => setForm((prev) => ({ ...prev, is_active: v }))}
                       disabled={!canEdit}
                     />
                   </div>
@@ -741,7 +834,7 @@ const InboxSettingsPage: React.FC = () => {
                     <Label>Ativar saudação do canal</Label>
                     <Select
                       value={form.greeting_enabled ? 'enabled' : 'disabled'}
-                      onValueChange={(v) => setForm({ ...form, greeting_enabled: v === 'enabled' })}
+                      onValueChange={(v) => setForm((prev) => ({ ...prev, greeting_enabled: v === 'enabled' }))}
                       disabled={!canEdit}
                     >
                       <SelectTrigger><SelectValue /></SelectTrigger>
@@ -760,7 +853,7 @@ const InboxSettingsPage: React.FC = () => {
                       <Textarea
                         id="welcome-message"
                         value={form.welcome_message}
-                        onChange={(e) => setForm({ ...form, welcome_message: e.target.value })}
+                        onChange={(e) => setForm((prev) => ({ ...prev, welcome_message: e.target.value }))}
                         placeholder="Olá! Como podemos ajudar?"
                         rows={3}
                         disabled={!canEdit}
@@ -771,7 +864,7 @@ const InboxSettingsPage: React.FC = () => {
                     <Label>Centro de Ajuda</Label>
                     <Select
                       value={form.help_center_category_id || 'none'}
-                      onValueChange={(v) => setForm({ ...form, help_center_category_id: v === 'none' ? '' : v })}
+                      onValueChange={(v) => setForm((prev) => ({ ...prev, help_center_category_id: v === 'none' ? '' : v }))}
                       disabled={!canEdit}
                     >
                       <SelectTrigger><SelectValue placeholder="Selecionar Centro de Ajuda" /></SelectTrigger>
@@ -788,7 +881,7 @@ const InboxSettingsPage: React.FC = () => {
                     <Label>Bloquear para conversa única</Label>
                     <Select
                       value={form.lock_to_single_conversation ? 'enabled' : 'disabled'}
-                      onValueChange={(v) => setForm({ ...form, lock_to_single_conversation: v === 'enabled' })}
+                      onValueChange={(v) => setForm((prev) => ({ ...prev, lock_to_single_conversation: v === 'enabled' }))}
                       disabled={!canEdit}
                     >
                       <SelectTrigger><SelectValue /></SelectTrigger>
@@ -1117,7 +1210,7 @@ const InboxSettingsPage: React.FC = () => {
                   <div className="space-y-6">
                     <div className="flex items-center gap-4">
                       <div
-                        className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-2 border-dashed bg-muted"
+                        className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-2 border-dashed bg-muted overflow-hidden"
                         style={{ borderColor: widgetForm.widget_color }}
                       >
                         {widgetForm.avatar_url ? (
@@ -1130,21 +1223,57 @@ const InboxSettingsPage: React.FC = () => {
                           <Hash className="h-7 w-7 text-muted-foreground" />
                         )}
                       </div>
-                      <div className="space-y-2 flex-1">
+                      <div className="space-y-2 flex-1 min-w-0">
                         <Label>Avatar do site</Label>
-                        <Input
-                          placeholder="URL da imagem"
-                          value={widgetForm.avatar_url}
-                          onChange={(e) => setWidgetForm({ ...widgetForm, avatar_url: e.target.value })}
-                          disabled={!canEdit}
-                        />
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/gif,image/webp"
+                            className="hidden"
+                            id="inbox-avatar-upload"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              e.target.value = '';
+                              if (!file || !channel?.id || !currentOrg?.id || !canEdit) return;
+                              try {
+                                const url = await uploadInboxAvatar(currentOrg.id, channel.id, file);
+                                setWidgetForm((prev) => ({ ...prev, avatar_url: url }));
+                                toast.success('Avatar carregado');
+                              } catch (err) {
+                                toast.error(err instanceof Error ? err.message : 'Erro ao carregar');
+                              }
+                            }}
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="shrink-0"
+                            disabled={!canEdit}
+                            onClick={() => document.getElementById('inbox-avatar-upload')?.click()}
+                          >
+                            <Upload className="h-4 w-4 mr-1.5" />
+                            Carregar imagem
+                          </Button>
+                          <span className="hidden sm:inline self-center text-muted-foreground text-sm">ou</span>
+                          <Input
+                            placeholder="Inserir URL da imagem"
+                            value={widgetForm.avatar_url}
+                            onChange={(e) => setWidgetForm((prev) => ({ ...prev, avatar_url: e.target.value }))}
+                            disabled={!canEdit}
+                            className="flex-1 min-w-0"
+                          />
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Carregue uma imagem (PNG, JPG, GIF, WebP até 2 MB) ou cole o link
+                        </p>
                       </div>
                     </div>
                     <div className="space-y-2">
                       <Label>Nome do site</Label>
                       <Input
                         value={widgetForm.site_name}
-                        onChange={(e) => setWidgetForm({ ...widgetForm, site_name: e.target.value })}
+                        onChange={(e) => setWidgetForm((prev) => ({ ...prev, site_name: e.target.value }))}
                         placeholder="Ex: Agents Labs - Portal"
                         disabled={!canEdit}
                       />
@@ -1153,7 +1282,7 @@ const InboxSettingsPage: React.FC = () => {
                       <Label>Título de boas-vindas (welcomeTitle)</Label>
                       <Input
                         value={widgetForm.welcome_title}
-                        onChange={(e) => setWidgetForm({ ...widgetForm, welcome_title: e.target.value })}
+                        onChange={(e) => setWidgetForm((prev) => ({ ...prev, welcome_title: e.target.value }))}
                         placeholder="Ex: Olá, tudo bem?"
                         disabled={!canEdit}
                       />
@@ -1163,7 +1292,7 @@ const InboxSettingsPage: React.FC = () => {
                       <Textarea
                         value={widgetForm.welcome_description}
                         onChange={(e) =>
-                          setWidgetForm({ ...widgetForm, welcome_description: e.target.value.slice(0, 255) })
+                          setWidgetForm((prev) => ({ ...prev, welcome_description: e.target.value.slice(0, 255) }))
                         }
                         placeholder="Sou o assistente virtual e posso ajudar com informações, dúvidas ou direcionar você para um atendente. Como posso ajudar?"
                         rows={4}
@@ -1177,10 +1306,10 @@ const InboxSettingsPage: React.FC = () => {
                       <Select
                         value={widgetForm.response_time}
                         onValueChange={(v) =>
-                          setWidgetForm({
-                            ...widgetForm,
-                            response_time: v as typeof widgetForm.response_time,
-                          })
+                          setWidgetForm((prev) => ({
+                            ...prev,
+                            response_time: v as typeof prev.response_time,
+                          }))
                         }
                         disabled={!canEdit}
                       >
@@ -1201,14 +1330,14 @@ const InboxSettingsPage: React.FC = () => {
                           className="h-10 w-14 p-1 cursor-pointer"
                           value={widgetForm.widget_color}
                           onChange={(e) =>
-                            setWidgetForm({ ...widgetForm, widget_color: e.target.value })
+                            setWidgetForm((prev) => ({ ...prev, widget_color: e.target.value }))
                           }
                           disabled={!canEdit}
                         />
                         <Input
                           value={widgetForm.widget_color}
                           onChange={(e) =>
-                            setWidgetForm({ ...widgetForm, widget_color: e.target.value })
+                            setWidgetForm((prev) => ({ ...prev, widget_color: e.target.value }))
                           }
                           disabled={!canEdit}
                           className="font-mono"
@@ -1220,7 +1349,7 @@ const InboxSettingsPage: React.FC = () => {
                       <RadioGroup
                         value={widgetForm.position}
                         onValueChange={(v) =>
-                          setWidgetForm({ ...widgetForm, position: v as 'right' | 'left' })
+                          setWidgetForm((prev) => ({ ...prev, position: v as 'right' | 'left' }))
                         }
                         className="flex gap-4"
                         disabled={!canEdit}
@@ -1243,7 +1372,7 @@ const InboxSettingsPage: React.FC = () => {
                       <RadioGroup
                         value={widgetForm.type}
                         onValueChange={(v) =>
-                          setWidgetForm({ ...widgetForm, type: v as 'standard' | 'expanded_bubble' })
+                          setWidgetForm((prev) => ({ ...prev, type: v as 'standard' | 'expanded_bubble' }))
                         }
                         className="flex gap-4"
                         disabled={!canEdit}
@@ -1266,7 +1395,7 @@ const InboxSettingsPage: React.FC = () => {
                       <Input
                         value={widgetForm.launcher_title}
                         onChange={(e) =>
-                          setWidgetForm({ ...widgetForm, launcher_title: e.target.value })
+                          setWidgetForm((prev) => ({ ...prev, launcher_title: e.target.value }))
                         }
                         placeholder="Ex: Fale conosco no chat"
                         disabled={!canEdit}

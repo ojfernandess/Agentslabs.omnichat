@@ -47,6 +47,7 @@
       welcomeDescription: overrides.welcomeDescription ?? apiConfig.welcome_description ?? apiConfig.welcome_message ?? "Como posso ajudar?",
       widgetColor: overrides.widgetColor ?? apiConfig.widget_color ?? apiConfig.primary_color ?? "#7C3AED",
       siteName: overrides.siteName ?? apiConfig.site_name ?? "Chat",
+      avatarUrl: overrides.avatarUrl ?? apiConfig.avatar_url ?? "",
     };
   }
 
@@ -95,6 +96,7 @@
     var type = cfg.type || "standard";
     var color = cfg.widgetColor || "#7C3AED";
     var launcherTitle = cfg.launcherTitle || "Fale conosco no chat";
+    var avatarUrl = cfg.avatarUrl || "";
 
     var isRight = position === "right";
 
@@ -114,14 +116,18 @@
 
     if (type === "expanded_bubble") {
       launcher.style.cssText =
-        "display:flex;align-items:center;gap:8px;padding:0 20px;height:48px;border-radius:24px;border:none;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.15);color:#fff;font-size:14px;font-weight:500;transition:transform 0.2s;";
+        "display:flex;align-items:center;gap:10px;padding:6px 20px;height:48px;border-radius:24px;border:none;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.15);color:#fff;font-size:14px;font-weight:500;transition:transform 0.2s;overflow:visible;";
       launcher.style.backgroundColor = color;
-      launcher.innerHTML = '<span style="font-size:20px">&#128172;</span><span>' + escapeHtml(launcherTitle) + "</span>";
+      launcher.innerHTML = avatarUrl
+        ? '<span style="width:36px;height:36px;min-width:36px;min-height:36px;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 0 0 0.5px rgba(255,255,255,0.25);background:#fff"><img src="' + escapeHtml(avatarUrl) + '" alt="" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.innerHTML=\'&#128172;\';this.parentElement.style.fontSize=\'20px\';this.parentElement.style.background=\'transparent\';this.parentElement.style.boxShadow=\'none\'"></span><span style="white-space:nowrap">' + escapeHtml(launcherTitle) + "</span>"
+        : '<span style="font-size:20px;flex-shrink:0">&#128172;</span><span style="white-space:nowrap">' + escapeHtml(launcherTitle) + "</span>";
     } else {
       launcher.style.cssText =
-        "width:56px;height:56px;border-radius:50%;border:none;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.15);display:flex;align-items:center;justify-content:center;color:#fff;font-size:24px;transition:transform 0.2s;";
+        "width:56px;height:56px;border-radius:50%;border:none;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.15);display:flex;align-items:center;justify-content:center;color:#fff;font-size:24px;transition:transform 0.2s;overflow:hidden;padding:3px;box-sizing:border-box;";
       launcher.style.backgroundColor = color;
-      launcher.innerHTML = "&#128172;";
+      launcher.innerHTML = avatarUrl
+        ? '<span style="width:100%;height:100%;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 0.5px rgba(255,255,255,0.2);background:#fff"><img src="' + escapeHtml(avatarUrl) + '" alt="" style="width:100%;height:100%;object-fit:cover" onerror="var p=this.parentElement;p.innerHTML=\'&#128172;\';p.style.fontSize=\'24px\';p.style.background=\'transparent\';p.style.boxShadow=\'none\'"></span>'
+        : "&#128172;";
     }
 
     launcher.addEventListener("mouseenter", function () {

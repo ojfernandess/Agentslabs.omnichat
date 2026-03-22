@@ -50,6 +50,7 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   FILTER_TABS,
   PRIORITY_LABELS,
@@ -113,6 +114,8 @@ const ConversationsPage: React.FC = () => {
     message: '',
   });
   const [deleteConvoId, setDeleteConvoId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [composerModKey, setComposerModKey] = useState<'⌘' | 'Ctrl'>('Ctrl');
@@ -584,8 +587,28 @@ const ConversationsPage: React.FC = () => {
     onSuccess: (id) => {
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
       setDeleteConvoId(null);
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
       if (selectedConvoId === id) setSelectedConvoId(null);
       toast.success('Conversa excluída');
+    },
+    onError: (e: Error) => toast.error(e.message || 'Erro ao excluir'),
+  });
+
+  const bulkDeleteConversations = useMutation({
+    mutationFn: async (ids: string[]) => {
+      if (ids.length === 0) return;
+      const { error } = await supabase.from('conversations').delete().in('id', ids);
+      if (error) throw error;
+    },
+    onSuccess: (_, ids) => {
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      setSelectedIds(new Set());
+      if (ids.includes(selectedConvoId ?? '')) setSelectedConvoId(null);
+      toast.success(`${ids.length} conversa(s) excluída(s)`);
     },
     onError: (e: Error) => toast.error(e.message || 'Erro ao excluir'),
   });
@@ -744,7 +767,49 @@ const ConversationsPage: React.FC = () => {
               </button>
             ))}
           </div>
+          {filteredConversations.length > 0 && (
+            <div className="flex items-center gap-2 text-xs">
+              <Checkbox
+                id="select-all-convos"
+                checked={selectedIds.size === filteredConversations.length && filteredConversations.length > 0}
+                onCheckedChange={(checked) => {
+                  if (checked) {
+                    setSelectedIds(new Set(filteredConversations.map((c: any) => c.id)));
+                  } else {
+                    setSelectedIds(new Set());
+                  }
+                }}
+              />
+              <label htmlFor="select-all-convos" className="cursor-pointer text-muted-foreground">
+                Selecionar todas
+              </label>
+            </div>
+          )}
         </div>
+
+        {selectedIds.size > 0 && (
+          <div className="flex items-center justify-between gap-2 px-4 py-2 border-b bg-muted/50 text-sm">
+            <span className="text-muted-foreground">{selectedIds.size} selecionada(s)</span>
+            <div className="flex gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelectedIds(new Set())}
+              >
+                Desmarcar
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                disabled={bulkDeleteConversations.isPending}
+                onClick={() => setBulkDeleteOpen(true)}
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                Excluir
+              </Button>
+            </div>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto scrollbar-thin">
           {filteredConversations.length === 0 ? (
@@ -754,22 +819,34 @@ const ConversationsPage: React.FC = () => {
             </div>
           ) : (
             filteredConversations.map((convo: any) => (
-              <button
+              <div
                 key={convo.id}
                 onClick={() => setSelectedConvoId(convo.id)}
-                className={`w-full text-left px-4 py-3 border-b transition-colors hover:bg-muted/50 ${
+                className={`w-full text-left px-4 py-3 border-b transition-colors hover:bg-muted/50 cursor-pointer flex items-start gap-3 ${
                   selectedConvoId === convo.id ? 'bg-muted' : ''
                 }`}
               >
-                <div className="flex items-start gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-sm font-medium shrink-0 overflow-hidden">
-                    {convo.contacts?.avatar_url ? (
-                      <img src={convo.contacts.avatar_url} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      convo.contacts?.name?.charAt(0)?.toUpperCase() || <User className="h-4 w-4" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
+                <Checkbox
+                  checked={selectedIds.has(convo.id)}
+                  onCheckedChange={(checked) => {
+                    setSelectedIds((prev) => {
+                      const next = new Set(prev);
+                      if (checked) next.add(convo.id);
+                      else next.delete(convo.id);
+                      return next;
+                    });
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label={`Selecionar ${convo.contacts?.name || convo.id}`}
+                />
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-sm font-medium shrink-0 overflow-hidden">
+                  {convo.contacts?.avatar_url ? (
+                    <img src={convo.contacts.avatar_url} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    convo.contacts?.name?.charAt(0)?.toUpperCase() || <User className="h-4 w-4" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
                       <p className="text-sm font-medium truncate">
                         {convo.contacts?.name || convo.subject || `#${convo.id.slice(0, 6)}`}
@@ -797,8 +874,7 @@ const ConversationsPage: React.FC = () => {
                       )}
                     </div>
                   </div>
-                </div>
-              </button>
+              </div>
             ))
           )}
         </div>
@@ -1725,6 +1801,30 @@ const ConversationsPage: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={(v) => !v && setBulkDeleteOpen(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir {selectedIds.size} conversa(s)?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação não pode ser desfeita. Todas as mensagens das conversas selecionadas serão removidas.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const ids = Array.from(selectedIds);
+                bulkDeleteConversations.mutate(ids);
+                setBulkDeleteOpen(false);
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!deleteConvoId} onOpenChange={(v) => !v && setDeleteConvoId(null)}>
         <AlertDialogContent>

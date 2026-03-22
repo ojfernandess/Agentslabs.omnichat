@@ -239,11 +239,15 @@ const ChannelsPage: React.FC = () => {
                 public_token?: string;
                 auto_assign_enabled?: boolean | null;
                 routing_skill_tags?: string[] | null;
+                config?: Record<string, unknown>;
               }) => {
               const meta = channelMeta[channel.channel_type] || {
                 label: channel.channel_type,
                 color: '',
               };
+              const cfg = (channel.config ?? {}) as Record<string, unknown>;
+              const widget = (cfg.widget ?? {}) as Record<string, unknown>;
+              const avatarUrl = (widget.avatar_url as string) ?? (cfg.avatar_url as string) ?? '';
               return (
                 <div
                   key={channel.id}
@@ -251,9 +255,19 @@ const ChannelsPage: React.FC = () => {
                 >
                   <div className="flex items-start gap-4">
                     <div
-                      className={`flex h-10 w-10 items-center justify-center rounded-lg bg-muted ${meta.color}`}
+                      className={`relative h-10 w-10 shrink-0 rounded-lg overflow-hidden bg-muted ${meta.color}`}
                     >
-                      <Hash className="h-4 w-4" />
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <Hash className="h-4 w-4" />
+                      </div>
+                      {avatarUrl && (
+                        <img
+                          src={avatarUrl}
+                          alt=""
+                          className="absolute inset-0 w-full h-full object-cover"
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                        />
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">

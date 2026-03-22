@@ -154,23 +154,36 @@ Deno.serve(async (req) => {
         contactId = contact.id;
       }
 
-      const { data: newConvo, error: convoErr } = await supabase
+      const { data: existingConvo } = await supabase
         .from("conversations")
-        .insert({
-          organization_id: channel.organization_id,
-          contact_id: contactId,
-          channel_id: channel.id,
-          status: "open",
-        })
         .select("id")
-        .single();
+        .eq("contact_id", contactId)
+        .eq("channel_id", channel.id)
+        .in("status", ["open", "pending"])
+        .order("last_message_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-      if (convoErr || !newConvo) {
-        console.error("widget-chat conversation insert:", convoErr);
-        return jsonErr("Erro ao criar conversa", 500);
+      if (existingConvo) {
+        convoId = existingConvo.id;
+      } else {
+        const { data: newConvo, error: convoErr } = await supabase
+          .from("conversations")
+          .insert({
+            organization_id: channel.organization_id,
+            contact_id: contactId,
+            channel_id: channel.id,
+            status: "open",
+          })
+          .select("id")
+          .single();
+
+        if (convoErr || !newConvo) {
+          console.error("widget-chat conversation insert:", convoErr);
+          return jsonErr("Erro ao criar conversa", 500);
+        }
+        convoId = newConvo.id;
       }
-
-      convoId = newConvo.id;
 
       if (content) {
         await supabase.from("messages").insert({

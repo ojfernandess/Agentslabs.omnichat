@@ -28,7 +28,8 @@ export default function WidgetChatPage() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [config, setConfig] = useState<{ welcome_title?: string; welcome_description?: string; site_name?: string } | null>(null);
+  const [config, setConfig] = useState<{ welcome_title?: string; welcome_description?: string; site_name?: string; avatar_url?: string } | null>(null);
+  const [avatarError, setAvatarError] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -63,6 +64,7 @@ export default function WidgetChatPage() {
         if (configRes.ok) {
           const cfg = await configRes.json();
           setConfig(cfg);
+          setAvatarError(false);
         }
 
         let convId = existingConvId;
@@ -188,11 +190,21 @@ export default function WidgetChatPage() {
   const welcomeTitle = config?.welcome_title || 'Olá!';
   const welcomeDesc = config?.welcome_description || 'Como posso ajudar?';
   const siteName = config?.site_name || 'Suporte';
+  const avatarUrl = config?.avatar_url;
 
   return (
     <div className="flex h-[400px] flex-col bg-background">
       <header className="flex shrink-0 items-center gap-2 border-b bg-muted/50 px-3 py-2">
-        <MessageCircle className="h-5 w-5 text-primary" />
+        {avatarUrl && !avatarError ? (
+          <img
+            src={avatarUrl}
+            alt=""
+            className="h-8 w-8 shrink-0 rounded-full object-cover"
+            onError={() => setAvatarError(true)}
+          />
+        ) : (
+          <MessageCircle className="h-5 w-5 shrink-0 text-primary" />
+        )}
         <span className="font-medium">{siteName}</span>
       </header>
 

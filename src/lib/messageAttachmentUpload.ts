@@ -56,3 +56,32 @@ export async function uploadMessageAttachment(
     file_name: file.name,
   };
 }
+
+const AVATAR_ALLOWED = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+
+/** Upload de avatar para inbox (widget). Bucket inbox-avatars. */
+export async function uploadInboxAvatar(
+  organizationId: string,
+  channelId: string,
+  file: File
+): Promise<string> {
+  if (!AVATAR_ALLOWED.has(file.type)) {
+    throw new Error('Use imagem PNG, JPG, GIF ou WebP.');
+  }
+  if (file.size > 2 * 1024 * 1024) throw new Error('Máximo 2 MB.');
+
+  const ext = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase().slice(0, 4) : 'jpg';
+  const extMap: Record<string, string> = { jpeg: 'jpg', jpg: 'jpg', png: 'png', gif: 'gif', webp: 'webp' };
+  const safeExt = extMap[ext] || 'jpg';
+  const path = `${organizationId}/${channelId}-${crypto.randomUUID()}.${safeExt}`;
+
+  const { error } = await supabase.storage.from('inbox-avatars').upload(path, file, {
+    cacheControl: '3600',
+    upsert: false,
+    contentType: file.type || 'image/jpeg',
+  });
+  if (error) throw new Error(error.message);
+
+  const { data } = supabase.storage.from('inbox-avatars').getPublicUrl(path);
+  return data.publicUrl;
+}
