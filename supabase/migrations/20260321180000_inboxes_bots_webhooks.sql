@@ -1,3 +1,4 @@
+-- Idempotente: seguro quando tabelas/canal já existiam sem histórico de migração alinhado.
 -- Extend channel types (API custom + LINE)
 ALTER TYPE public.channel_type ADD VALUE IF NOT EXISTS 'api';
 ALTER TYPE public.channel_type ADD VALUE IF NOT EXISTS 'line';
@@ -8,7 +9,7 @@ ALTER TABLE public.channels
 CREATE UNIQUE INDEX IF NOT EXISTS channels_public_token_idx ON public.channels(public_token);
 
 -- Agent Bots (Seção 18)
-CREATE TABLE public.agent_bots (
+CREATE TABLE IF NOT EXISTS public.agent_bots (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
@@ -22,7 +23,7 @@ CREATE TABLE public.agent_bots (
 );
 ALTER TABLE public.agent_bots ENABLE ROW LEVEL SECURITY;
 
-CREATE TABLE public.channel_agent_bots (
+CREATE TABLE IF NOT EXISTS public.channel_agent_bots (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   channel_id UUID NOT NULL REFERENCES public.channels(id) ON DELETE CASCADE,
   agent_bot_id UUID NOT NULL REFERENCES public.agent_bots(id) ON DELETE CASCADE,
@@ -33,7 +34,7 @@ CREATE TABLE public.channel_agent_bots (
 ALTER TABLE public.channel_agent_bots ENABLE ROW LEVEL SECURITY;
 
 -- Webhooks de saída (Seção 19)
-CREATE TABLE public.outbound_webhooks (
+CREATE TABLE IF NOT EXISTS public.outbound_webhooks (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
@@ -49,15 +50,21 @@ CREATE TABLE public.outbound_webhooks (
 );
 ALTER TABLE public.outbound_webhooks ENABLE ROW LEVEL SECURITY;
 
+DROP TRIGGER IF EXISTS update_agent_bots_updated_at ON public.agent_bots;
 CREATE TRIGGER update_agent_bots_updated_at
   BEFORE UPDATE ON public.agent_bots
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_outbound_webhooks_updated_at ON public.outbound_webhooks;
 CREATE TRIGGER update_outbound_webhooks_updated_at
   BEFORE UPDATE ON public.outbound_webhooks
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- RLS: agent_bots
+DROP POLICY IF EXISTS "Members can view agent_bots" ON public.agent_bots;
+DROP POLICY IF EXISTS "Members can insert agent_bots" ON public.agent_bots;
+DROP POLICY IF EXISTS "Members can update agent_bots" ON public.agent_bots;
+DROP POLICY IF EXISTS "Members can delete agent_bots" ON public.agent_bots;
 CREATE POLICY "Members can view agent_bots"
   ON public.agent_bots FOR SELECT TO authenticated
   USING (organization_id IN (SELECT public.get_user_org_ids(auth.uid())));
@@ -75,6 +82,10 @@ CREATE POLICY "Members can delete agent_bots"
   USING (organization_id IN (SELECT public.get_user_org_ids(auth.uid())));
 
 -- RLS: outbound_webhooks
+DROP POLICY IF EXISTS "Members can view outbound_webhooks" ON public.outbound_webhooks;
+DROP POLICY IF EXISTS "Members can insert outbound_webhooks" ON public.outbound_webhooks;
+DROP POLICY IF EXISTS "Members can update outbound_webhooks" ON public.outbound_webhooks;
+DROP POLICY IF EXISTS "Members can delete outbound_webhooks" ON public.outbound_webhooks;
 CREATE POLICY "Members can view outbound_webhooks"
   ON public.outbound_webhooks FOR SELECT TO authenticated
   USING (organization_id IN (SELECT public.get_user_org_ids(auth.uid())));
@@ -92,6 +103,10 @@ CREATE POLICY "Members can delete outbound_webhooks"
   USING (organization_id IN (SELECT public.get_user_org_ids(auth.uid())));
 
 -- RLS: channel_agent_bots (via channel org)
+DROP POLICY IF EXISTS "Members can view channel_agent_bots" ON public.channel_agent_bots;
+DROP POLICY IF EXISTS "Members can insert channel_agent_bots" ON public.channel_agent_bots;
+DROP POLICY IF EXISTS "Members can update channel_agent_bots" ON public.channel_agent_bots;
+DROP POLICY IF EXISTS "Members can delete channel_agent_bots" ON public.channel_agent_bots;
 CREATE POLICY "Members can view channel_agent_bots"
   ON public.channel_agent_bots FOR SELECT TO authenticated
   USING (

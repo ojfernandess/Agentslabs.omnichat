@@ -1,4 +1,5 @@
 -- Presença, satisfação, notificações operacionais, logs de webhook e Realtime
+-- Idempotente (reexecução segura)
 
 ALTER TABLE public.organization_members
   ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
@@ -7,7 +8,7 @@ ALTER TABLE public.conversations
   ADD COLUMN IF NOT EXISTS satisfaction_score SMALLINT CHECK (satisfaction_score IS NULL OR (satisfaction_score >= 1 AND satisfaction_score <= 5));
 
 -- Notificações para supervisores / admins (webhook morto, agente offline)
-CREATE TABLE public.operational_notifications (
+CREATE TABLE IF NOT EXISTS public.operational_notifications (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
   notification_type TEXT NOT NULL,
@@ -19,13 +20,13 @@ CREATE TABLE public.operational_notifications (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_operational_notifications_org_created
+CREATE INDEX IF NOT EXISTS idx_operational_notifications_org_created
   ON public.operational_notifications (organization_id, created_at DESC);
 
 ALTER TABLE public.operational_notifications ENABLE ROW LEVEL SECURITY;
 
 -- Histórico de falhas de entrega (webhook de saída)
-CREATE TABLE public.webhook_delivery_logs (
+CREATE TABLE IF NOT EXISTS public.webhook_delivery_logs (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
   outbound_webhook_id UUID NOT NULL REFERENCES public.outbound_webhooks(id) ON DELETE CASCADE,
@@ -37,12 +38,14 @@ CREATE TABLE public.webhook_delivery_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_webhook_delivery_logs_org
+CREATE INDEX IF NOT EXISTS idx_webhook_delivery_logs_org
   ON public.webhook_delivery_logs (organization_id, created_at DESC);
 
 ALTER TABLE public.webhook_delivery_logs ENABLE ROW LEVEL SECURITY;
 
 -- Quem pode ver notificações operacionais
+DROP POLICY IF EXISTS "Supervisors and admins view operational_notifications" ON public.operational_notifications;
+DROP POLICY IF EXISTS "Supervisors mark notifications read" ON public.operational_notifications;
 CREATE POLICY "Supervisors and admins view operational_notifications"
   ON public.operational_notifications FOR SELECT TO authenticated
   USING (
@@ -77,6 +80,7 @@ CREATE POLICY "Supervisors mark notifications read"
   );
 
 -- Logs de webhook: mesmos papéis
+DROP POLICY IF EXISTS "Supervisors view webhook_delivery_logs" ON public.webhook_delivery_logs;
 CREATE POLICY "Supervisors view webhook_delivery_logs"
   ON public.webhook_delivery_logs FOR SELECT TO authenticated
   USING (
@@ -181,6 +185,11 @@ CREATE TRIGGER trg_member_offline
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('message-media', 'message-media', true)
 ON CONFLICT (id) DO NOTHING;
+
+DROP POLICY IF EXISTS "Authenticated upload message-media" ON storage.objects;
+DROP POLICY IF EXISTS "Public read message-media" ON storage.objects;
+DROP POLICY IF EXISTS "Users update own message-media" ON storage.objects;
+DROP POLICY IF EXISTS "Users delete own message-media" ON storage.objects;
 
 CREATE POLICY "Authenticated upload message-media"
   ON storage.objects FOR INSERT TO authenticated

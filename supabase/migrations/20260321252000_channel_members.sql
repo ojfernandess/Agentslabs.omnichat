@@ -1,6 +1,7 @@
 -- Channel members: agents who can access this inbox.
 -- Empty = all org members. When populated, only listed members can be assigned.
-CREATE TABLE public.channel_members (
+-- Idempotente
+CREATE TABLE IF NOT EXISTS public.channel_members (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   channel_id UUID NOT NULL REFERENCES public.channels(id) ON DELETE CASCADE,
   organization_member_id UUID NOT NULL REFERENCES public.organization_members(id) ON DELETE CASCADE,
@@ -8,9 +9,13 @@ CREATE TABLE public.channel_members (
   UNIQUE(channel_id, organization_member_id)
 );
 
-CREATE INDEX idx_channel_members_channel ON public.channel_members(channel_id);
+CREATE INDEX IF NOT EXISTS idx_channel_members_channel ON public.channel_members(channel_id);
 
 ALTER TABLE public.channel_members ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Members select channel_members" ON public.channel_members;
+DROP POLICY IF EXISTS "Admins insert channel_members" ON public.channel_members;
+DROP POLICY IF EXISTS "Admins delete channel_members" ON public.channel_members;
 
 CREATE POLICY "Members select channel_members"
   ON public.channel_members FOR SELECT TO authenticated

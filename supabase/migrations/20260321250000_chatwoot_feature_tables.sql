@@ -1,7 +1,8 @@
 -- Chatwoot-parity feature tables: audit, attributes, automation, macros, SLA, campaigns, help center, captain, roles, workflow, security.
 -- Conversations: SLA due columns + optional policy FK.
+-- Idempotente (reexecução segura)
 
-CREATE TABLE public.organization_audit_logs (
+CREATE TABLE IF NOT EXISTS public.organization_audit_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
   actor_user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
@@ -11,9 +12,9 @@ CREATE TABLE public.organization_audit_logs (
   metadata JSONB NOT NULL DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_organization_audit_logs_org_created ON public.organization_audit_logs(organization_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_organization_audit_logs_org_created ON public.organization_audit_logs(organization_id, created_at DESC);
 
-CREATE TABLE public.custom_attribute_definitions (
+CREATE TABLE IF NOT EXISTS public.custom_attribute_definitions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
   entity_type TEXT NOT NULL CHECK (entity_type IN ('conversation', 'contact')),
@@ -27,7 +28,7 @@ CREATE TABLE public.custom_attribute_definitions (
   UNIQUE (organization_id, entity_type, attribute_key)
 );
 
-CREATE TABLE public.automation_rules (
+CREATE TABLE IF NOT EXISTS public.automation_rules (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
@@ -39,7 +40,7 @@ CREATE TABLE public.automation_rules (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE public.macros (
+CREATE TABLE IF NOT EXISTS public.macros (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
@@ -48,7 +49,7 @@ CREATE TABLE public.macros (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE public.sla_policies (
+CREATE TABLE IF NOT EXISTS public.sla_policies (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
@@ -67,7 +68,7 @@ BEGIN
   END IF;
 END $$;
 
-CREATE TABLE public.campaigns (
+CREATE TABLE IF NOT EXISTS public.campaigns (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
@@ -81,7 +82,7 @@ CREATE TABLE public.campaigns (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE public.help_center_categories (
+CREATE TABLE IF NOT EXISTS public.help_center_categories (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
@@ -91,7 +92,7 @@ CREATE TABLE public.help_center_categories (
   UNIQUE (organization_id, slug)
 );
 
-CREATE TABLE public.help_center_articles (
+CREATE TABLE IF NOT EXISTS public.help_center_articles (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
   category_id UUID REFERENCES public.help_center_categories(id) ON DELETE SET NULL,
@@ -105,7 +106,7 @@ CREATE TABLE public.help_center_articles (
   UNIQUE (organization_id, slug)
 );
 
-CREATE TABLE public.captain_settings (
+CREATE TABLE IF NOT EXISTS public.captain_settings (
   organization_id UUID PRIMARY KEY REFERENCES public.organizations(id) ON DELETE CASCADE,
   enabled BOOLEAN NOT NULL DEFAULT false,
   api_base_url TEXT,
@@ -115,7 +116,7 @@ CREATE TABLE public.captain_settings (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE public.role_permissions (
+CREATE TABLE IF NOT EXISTS public.role_permissions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
   role public.org_role NOT NULL,
@@ -124,14 +125,14 @@ CREATE TABLE public.role_permissions (
   UNIQUE (organization_id, role, permission_key)
 );
 
-CREATE TABLE public.workflow_settings (
+CREATE TABLE IF NOT EXISTS public.workflow_settings (
   organization_id UUID PRIMARY KEY REFERENCES public.organizations(id) ON DELETE CASCADE,
   notes TEXT,
   transitions JSONB NOT NULL DEFAULT '{}',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE public.security_settings (
+CREATE TABLE IF NOT EXISTS public.security_settings (
   organization_id UUID PRIMARY KEY REFERENCES public.organizations(id) ON DELETE CASCADE,
   require_2fa_for_admins BOOLEAN NOT NULL DEFAULT false,
   allowed_ip_cidrs TEXT[] NOT NULL DEFAULT '{}',
@@ -156,6 +157,50 @@ ALTER TABLE public.captain_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.role_permissions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.workflow_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.security_settings ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Members select audit logs" ON public.organization_audit_logs;
+DROP POLICY IF EXISTS "Members insert audit logs" ON public.organization_audit_logs;
+DROP POLICY IF EXISTS "cad_select" ON public.custom_attribute_definitions;
+DROP POLICY IF EXISTS "cad_insert" ON public.custom_attribute_definitions;
+DROP POLICY IF EXISTS "cad_update" ON public.custom_attribute_definitions;
+DROP POLICY IF EXISTS "cad_delete" ON public.custom_attribute_definitions;
+DROP POLICY IF EXISTS "ar_select" ON public.automation_rules;
+DROP POLICY IF EXISTS "ar_insert" ON public.automation_rules;
+DROP POLICY IF EXISTS "ar_update" ON public.automation_rules;
+DROP POLICY IF EXISTS "ar_delete" ON public.automation_rules;
+DROP POLICY IF EXISTS "macros_select" ON public.macros;
+DROP POLICY IF EXISTS "macros_insert" ON public.macros;
+DROP POLICY IF EXISTS "macros_update" ON public.macros;
+DROP POLICY IF EXISTS "macros_delete" ON public.macros;
+DROP POLICY IF EXISTS "sla_select" ON public.sla_policies;
+DROP POLICY IF EXISTS "sla_insert" ON public.sla_policies;
+DROP POLICY IF EXISTS "sla_update" ON public.sla_policies;
+DROP POLICY IF EXISTS "sla_delete" ON public.sla_policies;
+DROP POLICY IF EXISTS "camp_select" ON public.campaigns;
+DROP POLICY IF EXISTS "camp_insert" ON public.campaigns;
+DROP POLICY IF EXISTS "camp_update" ON public.campaigns;
+DROP POLICY IF EXISTS "camp_delete" ON public.campaigns;
+DROP POLICY IF EXISTS "hcc_select" ON public.help_center_categories;
+DROP POLICY IF EXISTS "hcc_insert" ON public.help_center_categories;
+DROP POLICY IF EXISTS "hcc_update" ON public.help_center_categories;
+DROP POLICY IF EXISTS "hcc_delete" ON public.help_center_categories;
+DROP POLICY IF EXISTS "hca_select" ON public.help_center_articles;
+DROP POLICY IF EXISTS "hca_insert" ON public.help_center_articles;
+DROP POLICY IF EXISTS "hca_update" ON public.help_center_articles;
+DROP POLICY IF EXISTS "hca_delete" ON public.help_center_articles;
+DROP POLICY IF EXISTS "cap_select" ON public.captain_settings;
+DROP POLICY IF EXISTS "cap_insert" ON public.captain_settings;
+DROP POLICY IF EXISTS "cap_update" ON public.captain_settings;
+DROP POLICY IF EXISTS "rp_select" ON public.role_permissions;
+DROP POLICY IF EXISTS "rp_insert" ON public.role_permissions;
+DROP POLICY IF EXISTS "rp_update" ON public.role_permissions;
+DROP POLICY IF EXISTS "rp_delete" ON public.role_permissions;
+DROP POLICY IF EXISTS "ws_select" ON public.workflow_settings;
+DROP POLICY IF EXISTS "ws_insert" ON public.workflow_settings;
+DROP POLICY IF EXISTS "ws_update" ON public.workflow_settings;
+DROP POLICY IF EXISTS "ss_select" ON public.security_settings;
+DROP POLICY IF EXISTS "ss_insert" ON public.security_settings;
+DROP POLICY IF EXISTS "ss_update" ON public.security_settings;
 
 CREATE POLICY "Members select audit logs" ON public.organization_audit_logs FOR SELECT TO authenticated
   USING (organization_id IN (SELECT public.get_user_org_ids(auth.uid())));
@@ -255,21 +300,30 @@ CREATE POLICY "ss_insert" ON public.security_settings FOR INSERT TO authenticate
 CREATE POLICY "ss_update" ON public.security_settings FOR UPDATE TO authenticated
   USING (organization_id IN (SELECT public.get_user_org_ids(auth.uid())));
 
+DROP TRIGGER IF EXISTS update_custom_attribute_definitions_updated_at ON public.custom_attribute_definitions;
 CREATE TRIGGER update_custom_attribute_definitions_updated_at
   BEFORE UPDATE ON public.custom_attribute_definitions FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+DROP TRIGGER IF EXISTS update_automation_rules_updated_at ON public.automation_rules;
 CREATE TRIGGER update_automation_rules_updated_at
   BEFORE UPDATE ON public.automation_rules FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+DROP TRIGGER IF EXISTS update_macros_updated_at ON public.macros;
 CREATE TRIGGER update_macros_updated_at
   BEFORE UPDATE ON public.macros FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+DROP TRIGGER IF EXISTS update_sla_policies_updated_at ON public.sla_policies;
 CREATE TRIGGER update_sla_policies_updated_at
   BEFORE UPDATE ON public.sla_policies FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+DROP TRIGGER IF EXISTS update_campaigns_updated_at ON public.campaigns;
 CREATE TRIGGER update_campaigns_updated_at
   BEFORE UPDATE ON public.campaigns FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+DROP TRIGGER IF EXISTS update_help_center_articles_updated_at ON public.help_center_articles;
 CREATE TRIGGER update_help_center_articles_updated_at
   BEFORE UPDATE ON public.help_center_articles FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+DROP TRIGGER IF EXISTS update_captain_settings_updated_at ON public.captain_settings;
 CREATE TRIGGER update_captain_settings_updated_at
   BEFORE UPDATE ON public.captain_settings FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+DROP TRIGGER IF EXISTS update_workflow_settings_updated_at ON public.workflow_settings;
 CREATE TRIGGER update_workflow_settings_updated_at
   BEFORE UPDATE ON public.workflow_settings FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+DROP TRIGGER IF EXISTS update_security_settings_updated_at ON public.security_settings;
 CREATE TRIGGER update_security_settings_updated_at
   BEFORE UPDATE ON public.security_settings FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();

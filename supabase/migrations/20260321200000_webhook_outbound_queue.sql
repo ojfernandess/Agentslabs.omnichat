@@ -1,7 +1,12 @@
 -- Fila de entrega de webhooks de saída (Seção 19) + suporte a retries
-CREATE TYPE public.webhook_delivery_status AS ENUM ('pending', 'delivered', 'dead');
+-- Idempotente
+DO $$ BEGIN
+  CREATE TYPE public.webhook_delivery_status AS ENUM ('pending', 'delivered', 'dead');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TABLE public.webhook_outbound_queue (
+CREATE TABLE IF NOT EXISTS public.webhook_outbound_queue (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
   outbound_webhook_id UUID NOT NULL REFERENCES public.outbound_webhooks(id) ON DELETE CASCADE,
@@ -18,13 +23,14 @@ CREATE TABLE public.webhook_outbound_queue (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_webhook_queue_due
+CREATE INDEX IF NOT EXISTS idx_webhook_queue_due
   ON public.webhook_outbound_queue (next_attempt_at)
   WHERE status = 'pending';
 
 ALTER TABLE public.webhook_outbound_queue ENABLE ROW LEVEL SECURITY;
 -- Sem políticas: apenas service_role (Edge Functions) acessa
 
+DROP TRIGGER IF EXISTS update_webhook_outbound_queue_updated_at ON public.webhook_outbound_queue;
 CREATE TRIGGER update_webhook_outbound_queue_updated_at
   BEFORE UPDATE ON public.webhook_outbound_queue
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
