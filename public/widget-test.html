@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Teste do Widget - Agents Labs</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; }
+    h1 { font-size: 1.5rem; }
+    p { color: #666; line-height: 1.6; }
+    code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+    .note { background: #fef3c7; border: 1px solid #f59e0b; padding: 12px; border-radius: 8px; margin: 16px 0; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <h1>Teste do Widget de Chat</h1>
+  <p>Esta página serve para testar o widget de Live Chat. O widget deve aparecer no canto inferior direito.</p>
+  <div class="note">
+    <strong>Configuração:</strong> Substitua <code>SEU_TOKEN</code> e <code>SUA_API_URL</code> abaixo pelo token público da caixa Live Chat e pela URL das funções Supabase (ex: <code>https://SEU_PROJETO.supabase.co/functions/v1</code>).
+  </div>
+  <p>Se o widget não aparecer, verifique o console do navegador (F12) para mensagens de erro.</p>
+
+  <script>
+    // Edite estes valores para testar
+    var WIDGET_TOKEN = 'fd1f70fe-ec19-4d9d-a7a0-6615ae23726b';
+    var API_URL = 'https://uyagfnkcmcuijlzshmog.supabase.co/functions/v1'; // ex: https://uyagfnkcmcuijlzshmog.supabase.co/functions/v1
+
+    if (WIDGET_TOKEN && WIDGET_TOKEN !== 'SEU_TOKEN' && API_URL && API_URL !== 'SUA_API_URL') {
+      var s = document.createElement('script');
+      s.src = window.location.origin + '/widget.js';
+      s.setAttribute('data-inbox-token', WIDGET_TOKEN);
+      s.setAttribute('data-api-url', API_URL);
+      document.body.appendChild(s);
+    } else {
+      document.body.innerHTML += '<p style="color:#dc2626">Configure WIDGET_TOKEN e API_URL no código desta página.</p>';
+    }
+  </script>
+</body>
+</html>

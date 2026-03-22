@@ -20,6 +20,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
 import { compressImageFileForUpload } from '@/lib/mediaClient';
 import { uploadMessageAttachment } from '@/lib/messageAttachmentUpload';
@@ -28,7 +38,8 @@ import { parseCsatSettings } from '@/lib/csatSettings';
 import {
   Search, Plus, Send, Paperclip, MoreVertical, User, Clock,
   CheckCircle2, AlertCircle, MessageSquare, Inbox, Star, RotateCcw,
-  Moon, StickyNote,
+  Moon, StickyNote, Copy, Check, RefreshCw, PanelRightClose, PanelRightOpen,
+  UserPlus, Mail, Trash2,
 } from 'lucide-react';
 import {
   Select,
@@ -90,6 +101,18 @@ const ConversationsPage: React.FC = () => {
   const [snoozeInput, setSnoozeInput] = useState('');
   const [noteMode, setNoteMode] = useState(false);
   const [csatScore, setCsatScore] = useState<number | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [contactSidebarOpen, setContactSidebarOpen] = useState(true);
+  const [addContactOpen, setAddContactOpen] = useState(false);
+  const [newMessageOpen, setNewMessageOpen] = useState(false);
+  const [addContactForm, setAddContactForm] = useState({ name: '', email: '', phone: '', company: '' });
+  const [newMessageForm, setNewMessageForm] = useState({
+    contactSearch: '',
+    selectedContactId: null as string | null,
+    channelId: '',
+    message: '',
+  });
+  const [deleteConvoId, setDeleteConvoId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [composerModKey, setComposerModKey] = useState<'⌘' | 'Ctrl'>('Ctrl');
@@ -118,7 +141,7 @@ const ConversationsPage: React.FC = () => {
         .select(
           `
           *,
-          contacts(name, email, phone, avatar_url),
+          contacts(name, email, phone, avatar_url, custom_fields),
           channels(name, channel_type),
           assignee:organization_members!conversations_assignee_id_fkey(id, display_name)
         `
@@ -134,7 +157,7 @@ const ConversationsPage: React.FC = () => {
       if (error) {
         const { data: fallback } = await supabase
           .from('conversations')
-          .select('*, contacts(name, email, phone, avatar_url), channels(name, channel_type)')
+          .select('*, contacts(name, email, phone, avatar_url, custom_fields), channels(name, channel_type)')
           .eq('organization_id', currentOrg.id)
           .order('last_message_at', { ascending: false });
         let rows = fallback ?? [];
@@ -179,6 +202,46 @@ const ConversationsPage: React.FC = () => {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const isWhatsApp =
+    selectedConvo?.channels?.channel_type === 'whatsapp' &&
+    selectedConvo?.contact_id &&
+    selectedConvo?.channel_id;
+
+  const { data: profilePic, refetch: refetchProfile, isFetching: profileLoading } = useQuery({
+    queryKey: ['whatsapp-profile', selectedConvo?.contact_id, selectedConvo?.channel_id],
+    queryFn: async () => {
+      if (!selectedConvo?.contact_id || !selectedConvo?.channel_id) return null;
+      const { data, error } = await supabase.functions.invoke('fetch-whatsapp-profile', {
+        body: { contact_id: selectedConvo.contact_id, channel_id: selectedConvo.channel_id },
+      });
+      if (error) throw error;
+      return (data as { profilePictureUrl?: string | null; wuid?: string | null }) ?? null;
+    },
+    enabled: !!isWhatsApp,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const contactAvatar =
+    profilePic?.profilePictureUrl ||
+    selectedConvo?.contacts?.avatar_url ||
+    null;
+
+  const waId =
+    selectedConvo?.contacts?.phone
+      ? selectedConvo.contacts.phone.replace(/\D/g, '') + '@s.whatsapp.net'
+      : profilePic?.wuid ?? null;
+
+  const copyToClipboard = async (key: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedField(key);
+      toast.success('Copiado');
+      setTimeout(() => setCopiedField(null), 1500);
+    } catch {
+      toast.error('Não foi possível copiar');
+    }
+  };
 
   useEffect(() => {
     setComposerModKey(/Mac|iPhone|iPad/i.test(navigator.userAgent) ? '⌘' : 'Ctrl');
@@ -236,6 +299,16 @@ const ConversationsPage: React.FC = () => {
         patch.first_reply_at = new Date().toISOString();
       }
       await supabase.from('conversations').update(patch).eq('id', selectedConvoId);
+
+      if (!asNote) {
+        const { error: sendErr } = await supabase.functions.invoke('send-outbound-message', {
+          body: { conversation_id: selectedConvoId, content: content.trim() },
+        });
+        if (sendErr) {
+          const msg = (sendErr as { context?: { body?: { error?: string } } })?.context?.body?.error ?? sendErr.message;
+          throw new Error(msg || 'Falha ao enviar para o canal (WhatsApp).');
+        }
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['messages', selectedConvoId] });
@@ -243,9 +316,10 @@ const ConversationsPage: React.FC = () => {
       setMessageText('');
       setNoteMode(false);
     },
+    onError: (e: Error) => toast.error(e.message),
   });
 
-  // Create new conversation
+  // Create new conversation (sem contacto/canal — legado)
   const createConversation = useMutation({
     mutationFn: async () => {
       if (!currentOrg) return;
@@ -265,6 +339,137 @@ const ConversationsPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
       if (data) setSelectedConvoId(data.id);
     },
+  });
+
+  const { data: contactsForMessage = [] } = useQuery({
+    queryKey: ['contacts-newmessage', currentOrg?.id],
+    queryFn: async () => {
+      if (!currentOrg) return [];
+      const { data } = await supabase
+        .from('contacts')
+        .select('id, name, email, phone')
+        .eq('organization_id', currentOrg.id)
+        .order('name');
+      return data ?? [];
+    },
+    enabled: !!currentOrg && newMessageOpen,
+  });
+
+  const { data: channelsForMessage = [] } = useQuery({
+    queryKey: ['channels-newmessage', currentOrg?.id],
+    queryFn: async () => {
+      if (!currentOrg) return [];
+      const { data } = await supabase
+        .from('channels')
+        .select('id, name, channel_type')
+        .eq('organization_id', currentOrg.id)
+        .eq('is_active', true)
+        .order('name');
+      return data ?? [];
+    },
+    enabled: !!currentOrg && newMessageOpen,
+  });
+
+  const createContact = useMutation({
+    mutationFn: async () => {
+      if (!currentOrg) return;
+      await supabase.from('contacts').insert({
+        organization_id: currentOrg.id,
+        name: addContactForm.name.trim(),
+        email: addContactForm.email.trim() || null,
+        phone: addContactForm.phone.trim() || null,
+        company: addContactForm.company.trim() || null,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      queryClient.invalidateQueries({ queryKey: ['contacts-newmessage'] });
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      setAddContactOpen(false);
+      setAddContactForm({ name: '', email: '', phone: '', company: '' });
+      toast.success('Contato adicionado');
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const sendNewMessage = useMutation({
+    mutationFn: async () => {
+      if (!currentOrg || !currentMember) return null;
+      const { selectedContactId, channelId, message } = newMessageForm;
+      if (!selectedContactId || !channelId || !message.trim()) {
+        throw new Error('Selecione contato, caixa de entrada e escreva a mensagem');
+      }
+      const contact = contactsForMessage.find((c: { id: string }) => c.id === selectedContactId);
+      if (!contact?.phone && !contact?.email) {
+        throw new Error('O contato precisa de telefone ou e-mail para enviar mensagem');
+      }
+      const { data: existing } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('organization_id', currentOrg.id)
+        .eq('channel_id', channelId)
+        .eq('contact_id', selectedContactId)
+        .neq('status', 'resolved')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      let conversationId: string;
+      if (existing?.id) {
+        conversationId = existing.id;
+      } else {
+        const { data: created, error } = await supabase
+          .from('conversations')
+          .insert({
+            organization_id: currentOrg.id,
+            channel_id: channelId,
+            contact_id: selectedContactId,
+            status: 'open',
+            subject: contact?.name || 'Nova conversa',
+            assignee_id: currentMember.id,
+          })
+          .select('id')
+          .single();
+        if (error) throw error;
+        conversationId = created!.id;
+      }
+      await supabase.from('messages').insert({
+        conversation_id: conversationId,
+        sender_type: 'agent',
+        sender_id: currentMember.id,
+        message_type: 'outgoing',
+        content: message.trim(),
+      });
+      await supabase.from('conversations').update({
+        last_message_at: new Date().toISOString(),
+        first_reply_at: supabase.rpc ? null : undefined,
+      }).eq('id', conversationId);
+      const { data: convoMeta } = await supabase
+        .from('conversations')
+        .select('first_reply_at')
+        .eq('id', conversationId)
+        .single();
+      const patch: Record<string, string> = { last_message_at: new Date().toISOString() };
+      if (!convoMeta?.first_reply_at) {
+        patch.first_reply_at = new Date().toISOString();
+      }
+      await supabase.from('conversations').update(patch).eq('id', conversationId);
+      const { error: sendErr } = await supabase.functions.invoke('send-outbound-message', {
+        body: { conversation_id: conversationId, content: message.trim() },
+      });
+      if (sendErr) {
+        throw new Error((sendErr as { message?: string }).message || 'Falha ao enviar');
+      }
+      return conversationId;
+    },
+    onSuccess: (conversationId) => {
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['messages'] });
+      setNewMessageOpen(false);
+      setNewMessageForm({ contactSearch: '', selectedContactId: null, channelId: '', message: '' });
+      if (conversationId) setSelectedConvoId(conversationId);
+      toast.success('Mensagem enviada');
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const filteredConversations = conversations.filter((c: any) => {
@@ -369,6 +574,20 @@ const ConversationsPage: React.FC = () => {
       toast.success('Conversa reaberta');
     },
     onError: (e: Error) => toast.error(e.message || 'Erro ao reabrir'),
+  });
+
+  const deleteConversation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('conversations').delete().eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: (id) => {
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      setDeleteConvoId(null);
+      if (selectedConvoId === id) setSelectedConvoId(null);
+      toast.success('Conversa excluída');
+    },
+    onError: (e: Error) => toast.error(e.message || 'Erro ao excluir'),
   });
 
   const csatOrg = parseCsatSettings(currentOrg?.settings);
@@ -482,9 +701,23 @@ const ConversationsPage: React.FC = () => {
         <div className="p-4 border-b space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Conversas</h2>
-            <Button size="icon" variant="ghost" onClick={() => createConversation.mutate()}>
-              <Plus className="h-4 w-4" />
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="icon" variant="ghost">
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setAddContactOpen(true)}>
+                  <UserPlus className="h-4 w-4 mr-2" />
+                  Adicionar contato
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setNewMessageOpen(true)}>
+                  <Mail className="h-4 w-4 mr-2" />
+                  Enviar mensagem
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -529,8 +762,12 @@ const ConversationsPage: React.FC = () => {
                 }`}
               >
                 <div className="flex items-start gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-sm font-medium shrink-0">
-                    {convo.contacts?.name?.charAt(0)?.toUpperCase() || <User className="h-4 w-4" />}
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-sm font-medium shrink-0 overflow-hidden">
+                    {convo.contacts?.avatar_url ? (
+                      <img src={convo.contacts.avatar_url} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      convo.contacts?.name?.charAt(0)?.toUpperCase() || <User className="h-4 w-4" />
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
@@ -567,16 +804,21 @@ const ConversationsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Chat area */}
-      <div className="flex-1 flex flex-col">
+      {/* Chat area + Contact sidebar */}
+      <div className="flex-1 flex min-w-0">
+        <div className="flex-1 flex flex-col min-w-0">
         {selectedConvo ? (
           <>
             {/* Cabeçalho (caixa, estado, prioridade, atribuição — modelo Chatwoot) */}
             <div className="border-b bg-card px-4 py-3 space-y-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-sm font-medium shrink-0">
-                    {selectedConvo.contacts?.name?.charAt(0)?.toUpperCase() || <User className="h-4 w-4" />}
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-sm font-medium shrink-0 overflow-hidden">
+                    {contactAvatar ? (
+                      <img src={contactAvatar} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      selectedConvo.contacts?.name?.charAt(0)?.toUpperCase() || <User className="h-4 w-4" />
+                    )}
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-semibold truncate">
@@ -638,6 +880,13 @@ const ConversationsPage: React.FC = () => {
                       )}
                     </>
                   )}
+                  <DropdownMenuItem
+                    onSelect={() => setDeleteConvoId(selectedConvo.id)}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Excluir conversa
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
               </div>
@@ -939,7 +1188,405 @@ const ConversationsPage: React.FC = () => {
             <p className="text-sm mt-1">Escolha uma conversa ao lado ou crie uma nova</p>
           </div>
         )}
+        </div>
+
+        {/* Contact sidebar — colapsável */}
+        {selectedConvo?.contacts && (
+          <div
+            className={`hidden lg:flex shrink-0 flex-col border-l bg-card overflow-y-auto transition-[width] ${
+              contactSidebarOpen ? 'w-72' : 'w-14'
+            }`}
+          >
+            <div
+              className={`flex items-center gap-2 min-h-[52px] ${
+                contactSidebarOpen ? 'p-4 border-b justify-between' : 'p-2 justify-center'
+              }`}
+            >
+              {contactSidebarOpen ? (
+                <>
+                  <h3 className="text-sm font-semibold">Contatos</h3>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={() => setContactSidebarOpen(false)}
+                    title="Recolher painel"
+                  >
+                    <PanelRightClose className="h-4 w-4" />
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                  onClick={() => setContactSidebarOpen(true)}
+                  title="Expandir painel de contatos"
+                >
+                  <PanelRightOpen className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+
+            {contactSidebarOpen && (
+            <>
+            <div className="p-4 border-b">
+              <div className="flex flex-col items-center gap-3">
+                <div className="relative">
+                  <div className="flex h-20 w-20 items-center justify-center rounded-full bg-muted overflow-hidden shrink-0">
+                    {contactAvatar ? (
+                      <img src={contactAvatar} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <span className="text-2xl font-medium text-muted-foreground">
+                        {selectedConvo.contacts.name?.charAt(0)?.toUpperCase() || <User className="h-8 w-8" />}
+                      </span>
+                    )}
+                  </div>
+                  {isWhatsApp && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="icon"
+                      className="absolute -bottom-1 -right-1 h-7 w-7 rounded-full"
+                      onClick={async () => {
+                        try {
+                          const { data, isError } = await refetchProfile();
+                          queryClient.invalidateQueries({ queryKey: ['conversations'] });
+                          if (isError) return;
+                          if (data?.profilePictureUrl) toast.success('Foto do WhatsApp atualizada');
+                          else toast.info('Contato sem foto de perfil no WhatsApp');
+                        } catch {
+                          toast.error('Falha ao verificar contato');
+                        }
+                      }}
+                      disabled={profileLoading}
+                      title="Verificar contato (atualizar foto WhatsApp)"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${profileLoading ? 'animate-spin' : ''}`} />
+                    </Button>
+                  )}
+                </div>
+                <div className="w-full text-center">
+                  <p className="font-medium truncate">{selectedConvo.contacts.name || '—'}</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Indisponível</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex-1 p-4 space-y-4 text-sm">
+              {selectedConvo.contacts.email && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">E-mail</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate">{selectedConvo.contacts.email}</span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0"
+                      onClick={() => copyToClipboard('email', selectedConvo.contacts.email)}
+                    >
+                      {copiedField === 'email' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {selectedConvo.contacts.phone && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Telefone</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate font-mono">{selectedConvo.contacts.phone}</span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0"
+                      onClick={() => copyToClipboard('phone', selectedConvo.contacts.phone)}
+                    >
+                      {copiedField === 'phone' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {waId && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">WhatsApp ID</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate font-mono text-xs">{waId}</span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0"
+                      onClick={() => copyToClipboard('wa', waId)}
+                    >
+                      {copiedField === 'wa' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {(selectedConvo.tags?.length ?? 0) > 0 && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-2">Etiquetas</p>
+                  <div className="flex flex-wrap gap-1">
+                    {(selectedConvo.tags as string[]).map((tag) => (
+                      <Badge key={tag} variant="secondary" className="text-[10px]">
+                        {tag}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {(selectedConvo.contacts as { custom_fields?: Record<string, unknown> })?.custom_fields &&
+                Object.keys((selectedConvo.contacts.custom_fields as Record<string, unknown>) ?? {}).length > 0 && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-2">Atributos do contato</p>
+                  <div className="space-y-1.5 text-xs">
+                    {Object.entries(
+                      (selectedConvo.contacts.custom_fields as Record<string, unknown>) ?? {}
+                    ).map(([k, v]) => (
+                      <div key={k} className="flex justify-between gap-2">
+                        <span className="text-muted-foreground">{k}</span>
+                        <span className="truncate">{String(v ?? '')}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(!selectedConvo.contacts?.custom_fields ||
+                Object.keys((selectedConvo.contacts.custom_fields as Record<string, unknown>) ?? {}).length === 0) && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-2">Atributos do contato</p>
+                  <p className="text-xs text-muted-foreground">Nenhum atributo encontrado</p>
+                </div>
+              )}
+            </div>
+            </>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Adicionar contato */}
+      <Dialog open={addContactOpen} onOpenChange={setAddContactOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Adicionar contato</DialogTitle>
+            <DialogDescription>Preencha os dados do novo contato.</DialogDescription>
+          </DialogHeader>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              createContact.mutate();
+            }}
+            className="space-y-4"
+          >
+            <div className="space-y-2">
+              <Label htmlFor="add-name">Nome</Label>
+              <Input
+                id="add-name"
+                value={addContactForm.name}
+                onChange={(e) => setAddContactForm({ ...addContactForm, name: e.target.value })}
+                placeholder="Nome do contato"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="add-email">E-mail</Label>
+              <Input
+                id="add-email"
+                type="email"
+                value={addContactForm.email}
+                onChange={(e) => setAddContactForm({ ...addContactForm, email: e.target.value })}
+                placeholder="email@exemplo.com"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="add-phone">Telefone</Label>
+              <Input
+                id="add-phone"
+                value={addContactForm.phone}
+                onChange={(e) => setAddContactForm({ ...addContactForm, phone: e.target.value })}
+                placeholder="+55 11 99999-9999"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="add-company">Empresa</Label>
+              <Input
+                id="add-company"
+                value={addContactForm.company}
+                onChange={(e) => setAddContactForm({ ...addContactForm, company: e.target.value })}
+                placeholder="Nome da empresa"
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setAddContactOpen(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={createContact.isPending}>
+                Adicionar
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Enviar mensagem — modelo Chatwoot */}
+      <Dialog
+        open={newMessageOpen}
+        onOpenChange={(v) => {
+          setNewMessageOpen(v);
+          if (!v) setNewMessageForm({ contactSearch: '', selectedContactId: null, channelId: '', message: '' });
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Nova mensagem</DialogTitle>
+            <DialogDescription>Selecione o contato e a caixa de entrada para enviar.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Para:</Label>
+              <div className="relative">
+                <Input
+                  placeholder="Pesquisar um contato pelo nome, e-mail ou número de telefone"
+                  value={
+                    newMessageForm.selectedContactId
+                      ? (contactsForMessage.find((c: { id: string }) => c.id === newMessageForm.selectedContactId) as { name?: string; email?: string; phone?: string })?.name ||
+                        (contactsForMessage.find((c: { id: string }) => c.id === newMessageForm.selectedContactId) as { email?: string })?.email ||
+                        (contactsForMessage.find((c: { id: string }) => c.id === newMessageForm.selectedContactId) as { phone?: string })?.phone ||
+                        ''
+                      : newMessageForm.contactSearch
+                  }
+                  onChange={(e) => {
+                    setNewMessageForm({ ...newMessageForm, contactSearch: e.target.value });
+                    if (newMessageForm.selectedContactId) setNewMessageForm((f) => ({ ...f, selectedContactId: null }));
+                  }}
+                  onFocus={() => {
+                    if (newMessageForm.selectedContactId) {
+                      const c = contactsForMessage.find((x: { id: string }) => x.id === newMessageForm.selectedContactId) as { name?: string; email?: string; phone?: string } | undefined;
+                      setNewMessageForm({ ...newMessageForm, selectedContactId: null, contactSearch: c?.name || c?.email || c?.phone || '' });
+                    }
+                  }}
+                />
+                {!newMessageForm.selectedContactId && (
+                  <div className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border bg-popover py-1 shadow-md">
+                    {(() => {
+                      const filtered = (contactsForMessage as Array<{ id: string; name?: string; email?: string; phone?: string }>)
+                        .filter((c) => {
+                          const q = newMessageForm.contactSearch.toLowerCase();
+                          if (!q) return true;
+                          return (
+                            c.name?.toLowerCase().includes(q) ||
+                            c.email?.toLowerCase().includes(q) ||
+                            c.phone?.replace(/\D/g, '').includes(q.replace(/\D/g, ''))
+                          );
+                        })
+                        .slice(0, 8);
+                      if (filtered.length > 0) {
+                        return filtered.map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            className="w-full px-3 py-2 text-left text-sm hover:bg-accent"
+                            onClick={() =>
+                              setNewMessageForm({
+                                ...newMessageForm,
+                                selectedContactId: c.id,
+                                contactSearch: c.name || c.email || c.phone || '',
+                              })
+                            }
+                          >
+                            <span className="font-medium">{c.name || '—'}</span>
+                            {(c.email || c.phone) && (
+                              <span className="ml-2 text-xs text-muted-foreground">
+                                {[c.email, c.phone].filter(Boolean).join(' • ')}
+                              </span>
+                            )}
+                          </button>
+                        ));
+                      }
+                      if (contactsForMessage.length === 0) {
+                        return <p className="px-3 py-4 text-sm text-muted-foreground">Nenhum contato. Adicione um em Adicionar contato.</p>;
+                      }
+                      if (newMessageForm.contactSearch.length >= 1) {
+                        return <p className="px-3 py-4 text-sm text-muted-foreground">Nenhum contato encontrado.</p>;
+                      }
+                      return null;
+                    })()}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Via:</Label>
+              <Select
+                value={newMessageForm.channelId || 'none'}
+                onValueChange={(v) => setNewMessageForm({ ...newMessageForm, channelId: v === 'none' ? '' : v })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Mostrar Caixas de Entrada" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Selecione a caixa</SelectItem>
+                  {(channelsForMessage as Array<{ id: string; name: string; channel_type?: string }>).map((ch) => (
+                    <SelectItem key={ch.id} value={ch.id}>
+                      <span className="flex items-center gap-2">
+                        {ch.name}
+                        {ch.channel_type && (
+                          <Badge variant="outline" className="text-[10px] font-normal">
+                            {channelLabels[ch.channel_type] ?? ch.channel_type}
+                          </Badge>
+                        )}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Mensagem</Label>
+              <Textarea
+                placeholder="Escreva sua mensagem aqui..."
+                value={newMessageForm.message}
+                onChange={(e) => setNewMessageForm({ ...newMessageForm, message: e.target.value })}
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                    e.preventDefault();
+                    if (newMessageForm.selectedContactId && newMessageForm.channelId && newMessageForm.message.trim()) {
+                      sendNewMessage.mutate();
+                    }
+                  }
+                }}
+                rows={5}
+                className="resize-none"
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setNewMessageOpen(false);
+                  setNewMessageForm({ contactSearch: '', selectedContactId: null, channelId: '', message: '' });
+                }}
+              >
+                Descartar
+              </Button>
+              <Button
+                onClick={() => sendNewMessage.mutate()}
+                disabled={
+                  !newMessageForm.selectedContactId ||
+                  !newMessageForm.channelId ||
+                  !newMessageForm.message.trim() ||
+                  sendNewMessage.isPending
+                }
+              >
+                <Send className="h-4 w-4 mr-2" />
+                Enviar (↵)
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={resolveOpen}
@@ -1078,6 +1725,26 @@ const ConversationsPage: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deleteConvoId} onOpenChange={(v) => !v && setDeleteConvoId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir conversa?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação não pode ser desfeita. Todas as mensagens da conversa serão removidas.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deleteConvoId && deleteConversation.mutate(deleteConvoId)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

@@ -84,11 +84,62 @@ Deno.serve(async (req) => {
   }
 
   const config = (channel.config ?? {}) as Record<string, unknown>;
+  const provider = String(config.whatsapp_provider ?? config.whatsappProvider ?? "meta");
+  const evolution = (config.evolution ?? {}) as Record<string, unknown>;
+  // Fallback para config em formato flat (ex.: evolution_base_url no topo)
+  const baseUrlRaw =
+    evolution.base_url ?? evolution.baseUrl ?? config.evolution_base_url ?? config.evolution_baseUrl ?? "";
+  const apiKeyRaw =
+    evolution.api_key ?? evolution.apiKey ?? config.evolution_api_key ?? config.evolution_apiKey ?? "";
+  const instanceNameRaw =
+    evolution.instance_name ?? evolution.instanceName ?? config.evolution_instance_name ?? config.evolution_instanceName ?? "";
+
+  const waTo = to.replace(/\D/g, "");
+
+  if (provider === "evolution" || (baseUrlRaw && instanceNameRaw)) {
+    const baseUrl = String(baseUrlRaw).replace(/\/$/, "");
+    const apiKey = String(apiKeyRaw);
+    const instanceName = String(instanceNameRaw).trim();
+    if (!baseUrl || !apiKey || !instanceName) {
+      return new Response(
+        JSON.stringify({ error: "Evolution: defina config.evolution.base_url, api_key e instance_name" }),
+        { status: 400, headers: { ...cors, "Content-Type": "application/json" } },
+      );
+    }
+    const sendUrl = `${baseUrl}/message/sendText/${encodeURIComponent(instanceName)}`;
+    const res = await fetch(sendUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: apiKey,
+      },
+      body: JSON.stringify({
+        number: waTo,
+        text,
+      }),
+    });
+    const resJson = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return new Response(JSON.stringify({ error: "Evolution API", detail: resJson }), {
+        status: 502,
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ ok: true, evolution: resJson }), {
+      status: 200,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
+
   const meta = (config.meta ?? {}) as Record<string, unknown>;
-  const phoneNumberId = String(meta.phone_number_id ?? "");
-  const accessToken = String(meta.access_token ?? "");
+  const phoneNumberId = String(meta.phone_number_id ?? meta.phoneNumberId ?? "");
+  const accessToken = String(meta.access_token ?? meta.accessToken ?? "");
   if (!phoneNumberId || !accessToken) {
-    return new Response(JSON.stringify({ error: "phone_number_id e access_token devem estar em config.meta" }), {
+    const hint =
+      provider === "meta"
+        ? "phone_number_id e access_token devem estar em config.meta (Meta/WhatsApp Business)."
+        : "Canal sem configuração válida. Se usa Evolution API: em Canais/Caixas, edite a caixa e defina Evolution API (base_url, api_key, instance_name). Se usa Meta: defina config.meta.phone_number_id e access_token.";
+    return new Response(JSON.stringify({ error: hint }), {
       status: 400,
       headers: { ...cors, "Content-Type": "application/json" },
     });
@@ -97,7 +148,6 @@ Deno.serve(async (req) => {
   const version = Deno.env.get("META_GRAPH_VERSION") ?? "v21.0";
   const graphUrl = `https://graph.facebook.com/${version}/${phoneNumberId}/messages`;
 
-  const waTo = to.replace(/\D/g, "");
   const res = await fetch(graphUrl, {
     method: "POST",
     headers: {

@@ -135,6 +135,42 @@ export type Database = {
           },
         ]
       }
+      channel_members: {
+        Row: {
+          id: string
+          channel_id: string
+          organization_member_id: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          channel_id: string
+          organization_member_id: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          channel_id?: string
+          organization_member_id?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "channel_members_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "channels"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "channel_members_organization_member_id_fkey"
+            columns: ["organization_member_id"]
+            isOneToOne: false
+            referencedRelation: "organization_members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       channels: {
         Row: {
           auto_assign_enabled: boolean

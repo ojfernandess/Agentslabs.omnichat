@@ -9,6 +9,9 @@ enabled = true
 [functions.meta-whatsapp-webhook]
 verify_jwt = false
 
+[functions.evolution-whatsapp-webhook]
+verify_jwt = false
+
 [functions.telegram-webhook]
 verify_jwt = false
 
@@ -17,6 +20,12 @@ verify_jwt = false
 
 [functions.send-whatsapp]
 verify_jwt = false
+
+[functions.send-outbound-message]
+verify_jwt = true
+
+[functions.fetch-whatsapp-profile]
+verify_jwt = true
 
 [functions.webhook-dispatcher]
 verify_jwt = false
@@ -32,3 +41,9 @@ verify_jwt = true
 
 [functions.send-csat-survey]
 verify_jwt = true
+
+[functions.get-widget-config]
+verify_jwt = false
+
+[functions.widget-chat]
+verify_jwt = false

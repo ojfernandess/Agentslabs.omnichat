@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -17,15 +17,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const userIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
+      const newUserId = newSession?.user?.id ?? null;
+
+      if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
+        userIdRef.current = null;
+        setSession(null);
+        setUser(null);
+        setLoading(false);
+        return;
+      }
+
+      if (event === 'INITIAL_SESSION') {
+        userIdRef.current = newUserId;
+        setSession(newSession);
+        setUser(newSession?.user ?? null);
+        setLoading(false);
+        return;
+      }
+
+      if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') {
+        if (newUserId === userIdRef.current) {
+          setLoading(false);
+          return;
+        }
+      }
+
+      userIdRef.current = newUserId;
+      setSession(newSession);
+      setUser(newSession?.user ?? null);
       setLoading(false);
     });
 
     supabase.auth.getSession().then(({ data: { session } }) => {
+      userIdRef.current = session?.user?.id ?? null;
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);

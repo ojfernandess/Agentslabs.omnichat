@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useOrg } from '@/contexts/OrgContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -14,7 +14,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Plus, Hash, Copy, Check } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Plus, Hash, Copy, Check, MoreVertical, Pencil, Trash2 } from 'lucide-react';
 import type { Database } from '@/integrations/supabase/types';
 import ProviderGrid from '@/components/channels/ProviderGrid';
 import InboxWizard from '@/components/channels/InboxWizard';
@@ -41,6 +57,7 @@ const channelMeta: Record<
 };
 
 const ChannelsPage: React.FC = () => {
+  const navigate = useNavigate();
   const { currentOrg, currentMember } = useOrg();
   const queryClient = useQueryClient();
   const canEditRouting =
@@ -51,6 +68,7 @@ const ChannelsPage: React.FC = () => {
   const [selectedProvider, setSelectedProvider] = useState<ChannelProvider | null>(null);
   const [metaPrefill, setMetaPrefill] = useState<Record<string, string | null> | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [deleteChannelId, setDeleteChannelId] = useState<string | null>(null);
 
   const clearMetaPrefill = useCallback(() => setMetaPrefill(null), []);
 
@@ -117,6 +135,19 @@ const ChannelsPage: React.FC = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['channels', currentOrg?.id] });
       toast.success('Roteamento actualizado');
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deleteChannel = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('channels').delete().eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['channels', currentOrg?.id] });
+      setDeleteChannelId(null);
+      toast.success('Caixa excluída');
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -225,7 +256,31 @@ const ChannelsPage: React.FC = () => {
                       <Hash className="h-4 w-4" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold truncate">{channel.name}</p>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-semibold truncate">{channel.name}</p>
+                        {canEditRouting && (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => navigate(`/settings/inboxes/${channel.id}`)}>
+                                <Pencil className="h-4 w-4 mr-2" />
+                                Editar
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => setDeleteChannelId(channel.id)}
+                                className="text-destructive focus:text-destructive"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Excluir
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
+                      </div>
                       <p className="text-xs text-muted-foreground mt-0.5">{meta.label}</p>
                       <div className="flex items-center gap-1.5 mt-2">
                         <span
@@ -307,6 +362,26 @@ const ChannelsPage: React.FC = () => {
             })
           )}
         </div>
+
+        <AlertDialog open={!!deleteChannelId} onOpenChange={(v) => !v && setDeleteChannelId(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Excluir caixa de entrada?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Esta ação não pode ser desfeita. As conversas desta caixa terão o canal desvinculado.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => deleteChannelId && deleteChannel.mutate(deleteChannelId)}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                Excluir
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );

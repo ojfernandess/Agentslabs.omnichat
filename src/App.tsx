@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
+import { BrowserRouter, Route, Routes, Navigate, useLocation } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -13,6 +13,7 @@ import ConversationsPage from "@/pages/ConversationsPage";
 import ContactsPage from "@/pages/ContactsPage";
 import TeamPage from "@/pages/TeamPage";
 import ChannelsPage from "@/pages/ChannelsPage";
+import InboxSettingsPage from "@/pages/InboxSettingsPage";
 import LabelsPage from "@/pages/LabelsPage";
 import SettingsPage from "@/pages/SettingsPage";
 import AnalyticsPage from "@/pages/AnalyticsPage";
@@ -32,12 +33,24 @@ import RolePermissionsPage from "@/pages/RolePermissionsPage";
 import SlaPoliciesPage from "@/pages/SlaPoliciesPage";
 import WorkflowSettingsPage from "@/pages/WorkflowSettingsPage";
 import SecuritySettingsPage from "@/pages/SecuritySettingsPage";
+import WidgetChatPage from "@/pages/WidgetChatPage";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 const AppRoutes = () => {
+  const location = useLocation();
   const { user, loading: authLoading } = useAuth();
   const { currentOrg, loading: orgLoading } = useOrg();
+
+  if (location.pathname === "/chat") {
+    return <WidgetChatPage />;
+  }
 
   if (authLoading || (user && orgLoading)) {
     return (
@@ -74,6 +87,7 @@ const AppRoutes = () => {
               <Route path="/settings/webhooks" element={<SettingsPage />} />
               <Route path="/settings/agents" element={<TeamPage />} />
               <Route path="/settings/inboxes" element={<ChannelsPage />} />
+              <Route path="/settings/inboxes/:id" element={<InboxSettingsPage />} />
               <Route path="/settings/labels" element={<LabelsPage />} />
               <Route path="/settings/canned-responses" element={<CannedResponsesPage />} />
               <Route path="/settings/teams" element={<TeamsSettingsPage />} />

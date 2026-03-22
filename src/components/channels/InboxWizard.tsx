@@ -9,6 +9,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
@@ -57,6 +58,12 @@ type WizardForm = {
   prechat_name: 'required' | 'optional' | 'hidden';
   prechat_email: 'required' | 'optional' | 'hidden';
   line_channel_secret: string;
+  /** WhatsApp: Meta Cloud API vs Evolution API (Baileys) */
+  whatsapp_provider: 'meta' | 'evolution';
+  evolution_base_url: string;
+  evolution_api_key: string;
+  evolution_instance_name: string;
+  evolution_webhook_secret: string;
 };
 
 const emptyForm = (): WizardForm => ({
@@ -87,6 +94,11 @@ const emptyForm = (): WizardForm => ({
   prechat_name: 'optional',
   prechat_email: 'optional',
   line_channel_secret: '',
+  whatsapp_provider: 'meta',
+  evolution_base_url: '',
+  evolution_api_key: '',
+  evolution_instance_name: '',
+  evolution_webhook_secret: '',
 });
 
 type Props = {
@@ -119,8 +131,21 @@ function buildConfig(
 
   switch (provider.dbType) {
     case 'whatsapp':
+      if (form.whatsapp_provider === 'evolution') {
+        return {
+          ...common,
+          whatsapp_provider: 'evolution',
+          evolution: {
+            base_url: form.evolution_base_url.replace(/\/$/, ''),
+            api_key: form.evolution_api_key,
+            instance_name: form.evolution_instance_name.trim(),
+            webhook_secret: form.evolution_webhook_secret.trim() || undefined,
+          },
+        };
+      }
       return {
         ...common,
+        whatsapp_provider: 'meta',
         meta: {
           waba_id: form.waba_id,
           phone_number_id: form.phone_number_id,
@@ -212,6 +237,7 @@ const InboxWizard: React.FC<Props> = ({
 
   useEffect(() => {
     if (!open || !metaPrefill || provider?.dbType !== 'whatsapp') return;
+    if (form.whatsapp_provider !== 'meta') return;
     setForm((f) => ({
       ...f,
       name:
@@ -225,7 +251,7 @@ const InboxWizard: React.FC<Props> = ({
       verify_token: metaPrefill.verify_token ?? f.verify_token,
     }));
     onMetaPrefillConsumed?.();
-  }, [open, metaPrefill, provider?.dbType, onMetaPrefillConsumed]);
+  }, [open, metaPrefill, provider?.dbType, onMetaPrefillConsumed, form.whatsapp_provider]);
 
   const baseUrl = useMemo(() => {
     const env = import.meta.env.VITE_PUBLIC_APP_URL as string | undefined;
@@ -334,6 +360,13 @@ const InboxWizard: React.FC<Props> = ({
     if (step === 1) {
       switch (provider.dbType) {
         case 'whatsapp':
+          if (form.whatsapp_provider === 'evolution') {
+            return (
+              form.evolution_base_url.trim().length > 0 &&
+              form.evolution_api_key.trim().length > 0 &&
+              form.evolution_instance_name.trim().length > 0
+            );
+          }
           return (
             form.waba_id.trim() &&
             form.phone_number_id.trim() &&
@@ -388,116 +421,221 @@ const InboxWizard: React.FC<Props> = ({
       case 'whatsapp':
         return (
           <div className="space-y-6">
-            <div className="rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden">
-              <div className="flex flex-col gap-4 p-6 sm:p-8">
-                <div className="flex items-start gap-4">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#25D366]/15 text-[#25D366]">
-                    <Phone className="h-6 w-6" strokeWidth={2} />
-                  </div>
-                  <div className="space-y-1 min-w-0">
-                    <h3 className="text-lg font-semibold leading-tight">
-                      Configuração rápida com Meta
-                    </h3>
-                    <p className="text-sm text-muted-foreground leading-relaxed">
-                      Utilize o fluxo de inscrição com a Meta para ligar os seus números. Será
-                      redirecionado para iniciar sessão na conta WhatsApp Business — recomendamos
-                      acesso de administrador.
+            <div className="space-y-3">
+              <Label className="text-sm font-medium">Tipo de integração WhatsApp</Label>
+              <RadioGroup
+                value={form.whatsapp_provider}
+                onValueChange={(v) =>
+                  setForm({ ...form, whatsapp_provider: v as WizardForm['whatsapp_provider'] })
+                }
+                className="grid gap-3 sm:grid-cols-2"
+              >
+                <label
+                  htmlFor="wp-meta"
+                  className="flex cursor-pointer items-start gap-3 rounded-lg border p-4 has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary/5"
+                >
+                  <RadioGroupItem value="meta" id="wp-meta" className="mt-1" />
+                  <div>
+                    <span className="font-medium">Meta Cloud API</span>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      WhatsApp Business oficial (Graph API, OAuth Meta).
                     </p>
                   </div>
-                </div>
-                <ul className="space-y-2.5 text-sm">
-                  {[
-                    'Sem configuração manual obrigatória quando concluir o OAuth com sucesso.',
-                    'Autenticação OAuth segura com a Meta.',
-                    'Após a ligação, configure webhooks e números no painel (instruções após criar a caixa).',
-                  ].map((line) => (
-                    <li key={line} className="flex gap-2.5">
-                      <Check className="h-4 w-4 shrink-0 text-[#25D366] mt-0.5" aria-hidden />
-                      <span className="text-muted-foreground">{line}</span>
-                    </li>
-                  ))}
-                </ul>
-                <div className="flex flex-col gap-3 pt-1">
-                  <Button
-                    type="button"
-                    size="lg"
-                    className="w-full sm:w-auto h-12 px-8 text-base font-medium bg-[#25D366] hover:bg-[#20BD5A] text-white shadow-sm border-0"
-                    disabled={!currentOrg || !getMetaAppId()}
-                    onClick={() => {
-                      if (!currentOrg) return;
-                      try {
-                        startMetaBusinessOAuth(currentOrg.id);
-                      } catch (e) {
-                        toast.error((e as Error).message);
-                      }
-                    }}
-                  >
-                    Conecte-se com WhatsApp Business
-                  </Button>
-                  <p className="text-xs text-muted-foreground">
-                    Registe{' '}
-                    <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
-                      {baseUrl}/integrations/meta/callback
-                    </code>{' '}
-                    no Meta App (Facebook Login OAuth) e o domínio em &quot;Allowed domains&quot;.
-                  </p>
-                  {!getMetaAppId() && (
-                    <p className="text-xs text-destructive">Defina META_APP_ID no .env.</p>
-                  )}
-                  <button
-                    type="button"
-                    className="text-left text-sm text-primary hover:underline underline-offset-4 w-fit"
-                    onClick={() => setWhatsappManualConfig((v) => !v)}
-                  >
-                    {whatsappManualConfig
-                      ? 'Ocultar configuração manual'
-                      : 'Use o fluxo de configuração manual se o número já está na API ou é um parceiro técnico.'}
-                  </button>
-                </div>
-              </div>
+                </label>
+                <label
+                  htmlFor="wp-evo"
+                  className="flex cursor-pointer items-start gap-3 rounded-lg border p-4 has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary/5"
+                >
+                  <RadioGroupItem value="evolution" id="wp-evo" className="mt-1" />
+                  <div>
+                    <span className="font-medium">Evolution API</span>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Instância própria (Baileys) — REST + webhooks.
+                    </p>
+                  </div>
+                </label>
+              </RadioGroup>
             </div>
 
-            {whatsappManualConfig && (
-              <div className="space-y-4 rounded-lg border border-dashed bg-muted/20 p-4">
-                <p className="text-sm font-medium">Credenciais manuais (WhatsApp Cloud API)</p>
-                <p className="text-xs text-muted-foreground">
-                  Preencha os campos abaixo se não utilizar OAuth. O webhook será configurado na Meta
-                  com a URL indicada após criar a caixa.
-                </p>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>WABA ID</Label>
-                    <Input
-                      value={form.waba_id}
-                      onChange={(e) => setForm({ ...form, waba_id: e.target.value })}
-                      placeholder="WhatsApp Business Account ID"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Phone Number ID</Label>
-                    <Input
-                      value={form.phone_number_id}
-                      onChange={(e) => setForm({ ...form, phone_number_id: e.target.value })}
-                    />
+            {form.whatsapp_provider === 'meta' && (
+              <>
+                <div className="overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm">
+                  <div className="flex flex-col gap-4 p-6 sm:p-8">
+                    <div className="flex items-start gap-4">
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#25D366]/15 text-[#25D366]">
+                        <Phone className="h-6 w-6" strokeWidth={2} />
+                      </div>
+                      <div className="min-w-0 space-y-1">
+                        <h3 className="text-lg font-semibold leading-tight">
+                          Configuração rápida com Meta
+                        </h3>
+                        <p className="text-sm leading-relaxed text-muted-foreground">
+                          Utilize o fluxo de inscrição com a Meta para ligar os seus números. Será
+                          redirecionado para iniciar sessão na conta WhatsApp Business — recomendamos
+                          acesso de administrador.
+                        </p>
+                      </div>
+                    </div>
+                    <ul className="space-y-2.5 text-sm">
+                      {[
+                        'Sem configuração manual obrigatória quando concluir o OAuth com sucesso.',
+                        'Autenticação OAuth segura com a Meta.',
+                        'Após a ligação, configure webhooks e números no painel (instruções após criar a caixa).',
+                      ].map((line) => (
+                        <li key={line} className="flex gap-2.5">
+                          <Check className="mt-0.5 h-4 w-4 shrink-0 text-[#25D366]" aria-hidden />
+                          <span className="text-muted-foreground">{line}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="flex flex-col gap-3 pt-1">
+                      <Button
+                        type="button"
+                        size="lg"
+                        className="h-12 w-full border-0 bg-[#25D366] px-8 text-base font-medium text-white shadow-sm hover:bg-[#20BD5A] sm:w-auto"
+                        disabled={!currentOrg || !getMetaAppId()}
+                        onClick={() => {
+                          if (!currentOrg) return;
+                          try {
+                            startMetaBusinessOAuth(currentOrg.id);
+                          } catch (e) {
+                            toast.error((e as Error).message);
+                          }
+                        }}
+                      >
+                        Conecte-se com WhatsApp Business
+                      </Button>
+                      <p className="text-xs text-muted-foreground">
+                        Registe{' '}
+                        <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
+                          {baseUrl}/integrations/meta/callback
+                        </code>{' '}
+                        no Meta App (Facebook Login OAuth) e o domínio em &quot;Allowed domains&quot;.
+                      </p>
+                      {!getMetaAppId() && (
+                        <p className="text-xs text-destructive">Defina META_APP_ID no .env.</p>
+                      )}
+                      <button
+                        type="button"
+                        className="w-fit text-left text-sm text-primary underline-offset-4 hover:underline"
+                        onClick={() => setWhatsappManualConfig((v) => !v)}
+                      >
+                        {whatsappManualConfig
+                          ? 'Ocultar configuração manual'
+                          : 'Use o fluxo de configuração manual se o número já está na API ou é um parceiro técnico.'}
+                      </button>
+                    </div>
                   </div>
                 </div>
+
+                {whatsappManualConfig && (
+                  <div className="space-y-4 rounded-lg border border-dashed bg-muted/20 p-4">
+                    <p className="text-sm font-medium">Credenciais manuais (WhatsApp Cloud API)</p>
+                    <p className="text-xs text-muted-foreground">
+                      Preencha os campos abaixo se não utilizar OAuth. O webhook será configurado na Meta
+                      com a URL indicada após criar a caixa.
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>WABA ID</Label>
+                        <Input
+                          value={form.waba_id}
+                          onChange={(e) => setForm({ ...form, waba_id: e.target.value })}
+                          placeholder="WhatsApp Business Account ID"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Phone Number ID</Label>
+                        <Input
+                          value={form.phone_number_id}
+                          onChange={(e) => setForm({ ...form, phone_number_id: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Access Token (System User)</Label>
+                      <Input
+                        type="password"
+                        value={form.access_token}
+                        onChange={(e) => setForm({ ...form, access_token: e.target.value })}
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Verify Token (webhook)</Label>
+                      <Input
+                        value={form.verify_token}
+                        onChange={(e) => setForm({ ...form, verify_token: e.target.value })}
+                        placeholder="Token que você configurará no Meta App"
+                      />
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {form.whatsapp_provider === 'evolution' && (
+              <div className="space-y-4 rounded-xl border bg-muted/20 p-6">
+                <div>
+                  <h3 className="text-lg font-semibold">Evolution API v2</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Servidor Evolution (Docker ou cloud). Referência:{' '}
+                    <a
+                      href="https://doc.evolution-api.com/v2/en/get-started/introduction"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary underline"
+                    >
+                      doc.evolution-api.com
+                    </a>
+                    . Envio:{' '}
+                    <code className="text-xs">POST /message/sendText/&#123;instance&#125;</code> com header{' '}
+                    <code className="text-xs">apikey</code>.
+                  </p>
+                </div>
                 <div className="space-y-2">
-                  <Label>Access Token (System User)</Label>
+                  <Label>URL base da API</Label>
+                  <Input
+                    type="url"
+                    placeholder="https://sua-evolution.com"
+                    value={form.evolution_base_url}
+                    onChange={(e) => setForm({ ...form, evolution_base_url: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>API Key</Label>
                   <Input
                     type="password"
-                    value={form.access_token}
-                    onChange={(e) => setForm({ ...form, access_token: e.target.value })}
+                    value={form.evolution_api_key}
+                    onChange={(e) => setForm({ ...form, evolution_api_key: e.target.value })}
+                    autoComplete="off"
+                    placeholder="Header apikey na Evolution"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Nome da instância</Label>
+                  <Input
+                    value={form.evolution_instance_name}
+                    onChange={(e) => setForm({ ...form, evolution_instance_name: e.target.value })}
+                    placeholder="ex.: loja-suporte"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Secret do webhook (opcional)</Label>
+                  <Input
+                    type="password"
+                    value={form.evolution_webhook_secret}
+                    onChange={(e) => setForm({ ...form, evolution_webhook_secret: e.target.value })}
+                    placeholder="Se preencher, use ?secret=... na URL do webhook"
                     autoComplete="off"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label>Verify Token (webhook)</Label>
-                  <Input
-                    value={form.verify_token}
-                    onChange={(e) => setForm({ ...form, verify_token: e.target.value })}
-                    placeholder="Token que você configurará no Meta App"
-                  />
-                </div>
+                <p className="text-xs text-muted-foreground">
+                  Depois de criar a caixa, copie a URL do webhook e registe na Evolution com{' '}
+                  <code className="rounded bg-muted px-1 text-[10px]">POST /webhook/set/&#123;instance&#125;</code>{' '}
+                  e eventos <code className="text-[10px]">MESSAGES_UPSERT</code> (e opcionalmente{' '}
+                  <code className="text-[10px]">CONNECTION_UPDATE</code>).
+                </p>
               </div>
             )}
           </div>
@@ -828,7 +966,10 @@ const InboxWizard: React.FC<Props> = ({
       ? `${edgeFunctionBase}/meta-whatsapp-webhook?channel_id=${created.id}`
       : `${baseUrl}/webhooks/whatsapp/${created.id}`;
     const tgSetUrl = edgeFunctionBase ? `${edgeFunctionBase}/telegram-set-webhook` : '';
-    const widgetSnippet = `<script src="${baseUrl}/widget.js" data-inbox-token="${created.public_token}"></script>`;
+    const apiUrl = edgeFunctionBase || ((import.meta.env.VITE_SUPABASE_URL as string)?.replace(/\/$/, '') + '/functions/v1');
+    const widgetSnippet = apiUrl
+      ? `<script src="${baseUrl}/widget.js" data-inbox-token="${created.public_token}" data-api-url="${apiUrl}" defer></script>`
+      : `<script src="${baseUrl}/widget.js" data-inbox-token="${created.public_token}"></script>`;
 
     return (
       <div className="space-y-4">
@@ -867,21 +1008,56 @@ const InboxWizard: React.FC<Props> = ({
         {created.channel_type === 'whatsapp' && (
           <div className="space-y-2">
             <Label className="text-xs text-muted-foreground">
-              Callback URL Meta (Edge Function meta-whatsapp-webhook)
+              {form.whatsapp_provider === 'evolution'
+                ? 'URL do webhook (Evolution API → POST /webhook/set/{instance})'
+                : 'Callback URL Meta (Edge Function meta-whatsapp-webhook)'}
             </Label>
-            {edgeFunctionBase && (
+            {edgeFunctionBase && form.whatsapp_provider === 'meta' && (
               <p className="text-[11px] text-muted-foreground">
                 Cole no Meta App → WhatsApp → Configuration. O Verify Token é o configurado em
                 config.meta.verify_token.
               </p>
             )}
+            {edgeFunctionBase && form.whatsapp_provider === 'evolution' && (
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Na Evolution, registe esta URL com eventos{' '}
+                <code className="text-[10px]">MESSAGES_UPSERT</code> (e opcionalmente{' '}
+                <code className="text-[10px]">CONNECTION_UPDATE</code>). Body exemplo:{' '}
+                <code className="text-[10px]">
+                  {`{"enabled":true,"url":"…","webhookByEvents":false,"webhookBase64":false,"events":["MESSAGES_UPSERT"]}`}
+                </code>
+              </p>
+            )}
             <div className="flex gap-2">
-              <Input readOnly value={waHook} className="font-mono text-xs" />
+              <Input
+                readOnly
+                value={
+                  form.whatsapp_provider === 'evolution' && edgeFunctionBase
+                    ? `${edgeFunctionBase}/evolution-whatsapp-webhook?channel_id=${created.id}${
+                        form.evolution_webhook_secret.trim()
+                          ? `&secret=${encodeURIComponent(form.evolution_webhook_secret.trim())}`
+                          : ''
+                      }`
+                    : waHook
+                }
+                className="font-mono text-xs"
+              />
               <Button
                 type="button"
                 variant="outline"
                 size="icon"
-                onClick={() => copyText('wa', waHook)}
+                onClick={() =>
+                  copyText(
+                    'wa',
+                    form.whatsapp_provider === 'evolution' && edgeFunctionBase
+                      ? `${edgeFunctionBase}/evolution-whatsapp-webhook?channel_id=${created.id}${
+                          form.evolution_webhook_secret.trim()
+                            ? `&secret=${encodeURIComponent(form.evolution_webhook_secret.trim())}`
+                            : ''
+                        }`
+                      : waHook
+                  )
+                }
               >
                 {copied === 'wa' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
               </Button>
