@@ -28,9 +28,10 @@ on:
         default: false
         type: boolean
 
+# Não cancelar workflow em curso: evita interromper `db push` a meio (estado inconsistente).
 concurrency:
   group: docker-deploy-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -47,6 +48,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Verificar prefixos únicos em supabase/migrations
+        run: node scripts/check-migration-versions.mjs
 
       - name: Instalar Supabase CLI
         uses: supabase/setup-cli@v1

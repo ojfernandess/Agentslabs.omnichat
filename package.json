@@ -15,6 +15,7 @@
     "functions:serve": "supabase functions serve",
     "functions:deploy": "supabase functions deploy",
     "db:migrate": "supabase db push --include-all",
+    "db:check-migrations": "node scripts/check-migration-versions.mjs",
     "db:reset": "supabase db reset"
   },
   "dependencies": {

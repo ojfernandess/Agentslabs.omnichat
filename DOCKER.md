@@ -4,7 +4,7 @@
 
 - **Imagem `web`**: build estático do Vite (React) servido por **Nginx**. Variáveis `VITE_*` são **embutidas no build** — não alteram em runtime.
 - **Base de dados / Auth / Storage**: **Supabase** (cloud ou self-hosted). Esta imagem **não** inclui Postgres nem o stack completo do Supabase.
-- **Migrações SQL** em `supabase/migrations/` aplicam-se ao projeto Supabase com `supabase db push --include-all` (CI ou `npm run db:migrate`).
+- **Migrações SQL** em `supabase/migrations/` aplicam-se ao projeto Supabase com `supabase db push --include-all` (CI ou `npm run db:migrate`). Cada ficheiro precisa de um prefixo de data/hora **único** antes do primeiro `_` — o CI corre `node scripts/check-migration-versions.mjs` para detetar duplicados.
 
 ## Build local
 
