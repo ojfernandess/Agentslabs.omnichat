@@ -59,7 +59,7 @@ O cliente Supabase (`src/integrations/supabase/client.ts`) redireciona pedidos a
 
 Pode manter o projeto Supabase (`*.supabase.co`) para Postgres, Auth e Realtime, mas **guardar ficheiros** (imagens, áudio, vídeo, PDF, avatares de inbox) num **bucket S3-compatible** no servidor (ex.: **MinIO** no Easypanel), em vez do **Supabase Storage** do projeto na cloud.
 
-**Passo a passo MinIO no Easypanel (domínio, buckets, secrets):** ver **[EASYPANEL_MINIO.md](./EASYPANEL_MINIO.md)**.
+**Passo a passo MinIO no Easypanel (domínio, buckets, secrets):** veja **[EASYPANEL_MINIO.md](./EASYPANEL_MINIO.md)**.
 
 | Onde | O quê |
 |------|--------|

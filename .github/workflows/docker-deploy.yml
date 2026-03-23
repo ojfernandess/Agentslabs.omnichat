@@ -69,7 +69,8 @@ jobs:
           else
             supabase link --project-ref "$SUPABASE_PROJECT_REF"
           fi
-          supabase db push
+          # --include-all: aplica migrações que o CLI pede explicitamente (ex. filas webhook/campanhas)
+          supabase db push --include-all
 
   docker:
     name: Build e push imagem (Dockerfile raiz)

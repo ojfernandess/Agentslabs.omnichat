@@ -4,7 +4,7 @@
 
 - **Imagem `web`**: build estático do Vite (React) servido por **Nginx**. Variáveis `VITE_*` são **embutidas no build** — não alteram em runtime.
 - **Base de dados / Auth / Storage**: **Supabase** (cloud ou self-hosted). Esta imagem **não** inclui Postgres nem o stack completo do Supabase.
-- **Migrações SQL** em `supabase/migrations/` aplicam-se ao projeto Supabase com `supabase db push` (CI ou local).
+- **Migrações SQL** em `supabase/migrations/` aplicam-se ao projeto Supabase com `supabase db push --include-all` (CI ou `npm run db:migrate`).
 
 ## Build local
 
@@ -22,7 +22,7 @@ Healthcheck: `GET /health` → `ok`.
 
 No push para `main` (ou execução manual):
 
-1. **Migrações**: `supabase link` + `supabase db push` contra o projeto remoto.
+1. **Migrações**: `supabase link` + `supabase db push --include-all` contra o projeto remoto.
 2. **Docker**: build e push para `ghcr.io/<owner>/<repo>:latest` e tag `:sha-<commit>`.
 
 ### Secrets obrigatórios

@@ -138,10 +138,14 @@ services:
 Se não usar o job `migrate`, aplique SQL com:
 
 - Supabase Dashboard → SQL, ou  
-- `supabase db push` local, ou  
+- `supabase db push --include-all` local (o CLI pode pedir `--include-all` para migrações como `20260322210000_webhook_ingest_campaign_queues.sql`), ou  
 - one-shot `db-init` com `docker compose -f docker-compose.easypanel.yml --profile migrate` e `DATABASE_URL` (ver comentários no compose).
 
-## 6. Erro `relation "…" already exists` no `db push`
+## 6. Erro “Rerun with `--include-all`” no CI ou no CLI
+
+O Supabase CLI às vezes exige **`supabase db push --include-all`** para aplicar certas migrações (ex.: filas de webhook/campanhas). O workflow **Docker (GHCR)** já usa essa flag; localmente use `npm run db:migrate` ou o comando acima.
+
+## 7. Erro `relation "…" already exists` no `db push`
 
 Significa que o **Postgres já tem as tabelas** (por exemplo criadas antes no Dashboard ou por outro fluxo), mas o **histórico de migrações** do Supabase ainda não tinha essa versão aplicada — o CI tentava criar `organizations` de novo.
 
@@ -157,7 +161,7 @@ supabase migration repair --status applied 20260321163200
 
 Ou use **Run workflow** com **skip_migrate** e aplique migrações só pelo Dashboard / CLI local.
 
-## 7. Checklist rápido
+## 8. Checklist rápido
 
 - [ ] Secrets `VITE_*` preenchidos no GitHub (ou build args no Easypanel se build lá).
 - [ ] Workflow verde em **Actions**.

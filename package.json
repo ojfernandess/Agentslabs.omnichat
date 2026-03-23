@@ -14,7 +14,7 @@
     "test:watch": "vitest",
     "functions:serve": "supabase functions serve",
     "functions:deploy": "supabase functions deploy",
-    "db:migrate": "supabase db push",
+    "db:migrate": "supabase db push --include-all",
     "db:reset": "supabase db reset"
   },
   "dependencies": {
