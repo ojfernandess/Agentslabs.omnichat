@@ -39,6 +39,17 @@ describe("runtimeEnv", () => {
     );
   });
 
+  it("normalizeFunctionsBaseUrl remove vários segmentos após functions/v1 (evita meta-webhook/process-media)", () => {
+    expect(
+      normalizeFunctionsBaseUrl(
+        "https://proj.supabase.co/functions/v1/meta-whatsapp-webhook/process-media",
+      ),
+    ).toBe("https://proj.supabase.co/functions/v1");
+    expect(
+      normalizeFunctionsBaseUrl("https://proj.supabase.co/functions/v1/process-media"),
+    ).toBe("https://proj.supabase.co/functions/v1");
+  });
+
   it("getMediaUploadFunctionsBaseUrl sem override coincide com getFunctionsBaseUrl", () => {
     expect(getMediaUploadFunctionsBaseUrl()).toBe(getFunctionsBaseUrl());
   });

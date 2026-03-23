@@ -12,14 +12,19 @@ export function getSupabaseUrl(): string {
 }
 
 /**
- * Garante que a base termina em `.../functions/v1` e não em `.../functions/v1/nome-da-função`.
- * Se `VITE_SUPABASE_FUNCTIONS_URL` for copiada do URL de uma função (ex. meta-whatsapp-webhook),
- * chamadas como `getFunctionUrl('process-media')` viram `.../meta-whatsapp-webhook/process-media`
- * e o handler errado responde (ex.: "channel_id obrigatório na query").
+ * Garante que a base é só `.../functions/v1` (sem caminho extra).
+ * Se a env tiver mais do que um segmento após `/functions/v1` (ex. copiar
+ * `.../meta-whatsapp-webhook/process-media`), o regex de um só segmento deixava
+ * `.../meta-whatsapp-webhook` e `getFunctionUrl('process-media')` gerava
+ * `.../meta-whatsapp-webhook/process-media` — o Edge continua a servir **meta-whatsapp-webhook**
+ * e responde com "channel_id obrigatório na query".
  */
 export function normalizeFunctionsBaseUrl(url: string): string {
-  const u = url.trim().replace(/\/+$/, "");
-  return u.replace(/(\/functions\/v1)\/[^/]+$/, "$1");
+  const trimmed = url.trim().replace(/\/+$/, "");
+  const marker = "/functions/v1";
+  const idx = trimmed.toLowerCase().indexOf(marker);
+  if (idx === -1) return trimmed;
+  return trimmed.slice(0, idx + marker.length);
 }
 
 /**
