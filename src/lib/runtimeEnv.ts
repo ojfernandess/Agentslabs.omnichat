@@ -12,6 +12,17 @@ export function getSupabaseUrl(): string {
 }
 
 /**
+ * Garante que a base termina em `.../functions/v1` e não em `.../functions/v1/nome-da-função`.
+ * Se `VITE_SUPABASE_FUNCTIONS_URL` for copiada do URL de uma função (ex. meta-whatsapp-webhook),
+ * chamadas como `getFunctionUrl('process-media')` viram `.../meta-whatsapp-webhook/process-media`
+ * e o handler errado responde (ex.: "channel_id obrigatório na query").
+ */
+export function normalizeFunctionsBaseUrl(url: string): string {
+  const u = url.trim().replace(/\/+$/, "");
+  return u.replace(/(\/functions\/v1)\/[^/]+$/, "$1");
+}
+
+/**
  * Base URL das Edge Functions (sem barra final).
  * - Se `VITE_SUPABASE_FUNCTIONS_URL` estiver definido, usa esse valor (modo local / proxy).
  * - Caso contrário: `{VITE_SUPABASE_URL}/functions/v1` (Supabase Cloud ou stack unificada).
@@ -19,7 +30,7 @@ export function getSupabaseUrl(): string {
 export function getFunctionsBaseUrl(): string {
   const custom = import.meta.env.VITE_SUPABASE_FUNCTIONS_URL;
   if (custom && typeof custom === 'string' && custom.trim().length > 0) {
-    return custom.trim().replace(/\/$/, '');
+    return normalizeFunctionsBaseUrl(custom);
   }
   return `${getSupabaseUrl()}/functions/v1`;
 }
@@ -37,7 +48,7 @@ export function getFunctionUrl(functionName: string): string {
 export function getMediaUploadFunctionsBaseUrl(): string {
   const custom = import.meta.env.VITE_EXTERNAL_MEDIA_UPLOAD_URL;
   if (custom && typeof custom === 'string' && custom.trim().length > 0) {
-    return custom.trim().replace(/\/$/, '');
+    return normalizeFunctionsBaseUrl(custom);
   }
   return getFunctionsBaseUrl();
 }
