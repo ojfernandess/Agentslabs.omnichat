@@ -35,11 +35,57 @@ Cron / schedule  →  process-webhook-ingest  →  POST interno meta-whatsapp-we
 
 ### Agendar o worker
 
-No **Supabase Dashboard** → **Edge Functions** → **Cron** (ou integração externa):
+#### Opção A — Cron no Dashboard (Supabase): HTTP ou Edge Function
+
+No painel: **Database** → **Cron** (ou **Integrations** → **Cron**, conforme a versão do projeto) → **Create a new cron job**.
+
+1. **Nome:** ex. `process-webhook-ingest` (não pode ser renomeado depois).
+2. **Schedule:** expressão cron, por exemplo:
+   - `* * * * *` = **cada minuto** (o preview mostra “every minute” em GMT).
+   - Ou `*/2 * * * *` = a cada 2 minutos.
+3. **Tipo:**  
+   - **HTTP Request** ou **Supabase Edge Function** só aparecem se a extensão **`pg_net`** estiver instalada.  
+   - Se vir o aviso *“pg_net needs to be installed”*: vá a **Database** → **Extensions** → ative **`pg_net`** (e confirme que **`pg_cron`** está ativo). Depois volte a criar o job.
+
+**Se escolher HTTP Request**
+
+| Campo | Valor |
+|--------|--------|
+| URL | `https://<PROJECT_REF>.supabase.co/functions/v1/process-webhook-ingest` |
+| Método | `POST` |
+| Headers | `Authorization: Bearer <INTERNAL_HOOK_SECRET>` e `Content-Type: application/json` |
+| Body (opcional) | `{"batch_size":25}` |
+
+Substitua `<PROJECT_REF>` pelo ID do projeto (Settings → API → Project URL) e `<INTERNAL_HOOK_SECRET>` pelo mesmo segredo das outras funções internas (**Edge Functions → Secrets**).
+
+**Se escolher Supabase Edge Function**
+
+- Selecione a função **`process-webhook-ingest`** na lista.
+- Confirme na documentação do Supabase se o cron injeta auth automaticamente; se o worker responder **401**, use antes a opção **HTTP Request** com o header `Authorization` explícito.
+
+**Se escolher SQL Snippet** (sem `pg_net` para HTTP)
+
+- Pode chamar uma **database function** que use `net.http_post` **depois** de `pg_net` instalado, ou agendar apenas lógica SQL. Para invocar a Edge Function, o caminho prático é **ativar `pg_net`** e usar **HTTP Request** ou um cron externo (Opção B).
+
+#### Opção B — Cron externo (sem pg_net)
+
+Qualquer serviço que faça `POST` periódico:
+
+```bash
+curl -sS -X POST \
+  "https://<PROJECT_REF>.supabase.co/functions/v1/process-webhook-ingest" \
+  -H "Authorization: Bearer <INTERNAL_HOOK_SECRET>" \
+  -H "Content-Type: application/json" \
+  -d '{"batch_size":25}'
+```
+
+Ex.: **GitHub Actions** (`schedule`), **Easypanel** cron, **cron** no VPS, etc.
+
+#### Resumo
 
 - **Função:** `process-webhook-ingest`
 - **Método:** `POST` com header `Authorization: Bearer <INTERNAL_HOOK_SECRET>`
-- **Frequência:** a cada **30–60 s** (ajustar à carga; picos podem usar **1 min**).
+- **Frequência:** a cada **1–2 min** é um bom ponto de partida; ajuste à carga.
 
 Corpo opcional: `{ "batch_size": 25 }` (máx. 50).
 
