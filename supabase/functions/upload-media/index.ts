@@ -65,10 +65,19 @@ function S3_BUCKET_INBOX(): string {
   return Deno.env.get("S3_MEDIA_BUCKET_INBOX")?.trim() || "inbox-avatars";
 }
 
-const cors: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+/** O browser envia `Access-Control-Request-Headers` no preflight; temos de ecoar em Allow-Headers ou o POST não dispara. */
+const DEFAULT_ALLOW_HEADERS =
+  "authorization, apikey, content-type, x-client-info, x-supabase-api-version, prefer";
+
+function corsHeaders(req: Request): Record<string, string> {
+  const requested = req.headers.get("Access-Control-Request-Headers");
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": requested?.trim() || DEFAULT_ALLOW_HEADERS,
+    "Access-Control-Max-Age": "86400",
+  };
+}
 
 const MAX_MESSAGE_BYTES = 10 * 1024 * 1024;
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
@@ -105,7 +114,11 @@ function getServiceClient(): SupabaseClient {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+  const cors = corsHeaders(req);
+
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: cors });
+  }
 
   if (!s3MediaConfigured()) {
     return new Response(
@@ -123,6 +136,8 @@ Deno.serve(async (req) => {
       headers: { ...cors, "Content-Type": "application/json" },
     });
   }
+
+  console.log("upload-media POST", (req.headers.get("content-type") ?? "").slice(0, 120));
 
   const authHeader = req.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
