@@ -30,6 +30,12 @@ verify_jwt = true
 [functions.webhook-dispatcher]
 verify_jwt = false
 
+[functions.process-webhook-ingest]
+verify_jwt = false
+
+[functions.campaign-worker]
+verify_jwt = false
+
 [functions.meta-oauth-exchange]
 verify_jwt = true
 

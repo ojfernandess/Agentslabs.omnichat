@@ -93,6 +93,10 @@ As migrações estão em `supabase/migrations/*.sql` e **assumem** schema `auth`
 
 Variáveis sensíveis (`SUPABASE_SERVICE_ROLE_KEY`, `INTERNAL_HOOK_SECRET`, etc.) devem ser configuradas no painel Supabase ou no `env` do serviço Edge Runtime.
 
+## Escalabilidade (webhooks e campanhas)
+
+Picos de mensagens, retries da Meta e campanhas em massa: ver **[SCALING_WEBHOOKS_AND_CAMPAIGNS.md](./SCALING_WEBHOOKS_AND_CAMPAIGNS.md)** (filas `webhook_ingest_jobs` / `campaign_send_jobs`, workers `process-webhook-ingest` e `campaign-worker`).
+
 ## Easypanel
 
 1. **App 1 – Web:** Dockerfile `Dockerfile` ou `deploy/Dockerfile`, contexto na **raiz** do repositório.

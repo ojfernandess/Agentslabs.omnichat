@@ -89,6 +89,45 @@ function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
   return diff === 0;
 }
 
+function verifyInternalHook(req: Request): boolean {
+  const secret = Deno.env.get("INTERNAL_HOOK_SECRET");
+  if (!secret || secret.length < 16) return false;
+  const auth = req.headers.get("Authorization");
+  const bearer = auth?.startsWith("Bearer ") ? auth.slice(7) : null;
+  const header = req.headers.get("x-internal-key");
+  const token = bearer ?? header;
+  return token === secret;
+}
+
+/** Chave idempotente para deduplicar retries da Meta (mensagem ou status). */
+function dedupeKeyFromMetaPayload(payload: Record<string, unknown>): string | null {
+  try {
+    const entries = payload.entry as Array<Record<string, unknown>> | undefined;
+    const ent = entries?.[0];
+    const changes = ent?.changes as Array<Record<string, unknown>> | undefined;
+    const change = changes?.[0];
+    const value = change?.value as Record<string, unknown> | undefined;
+    const messages = value?.messages as Array<Record<string, unknown>> | undefined;
+    const mid = messages?.[0]?.id;
+    if (mid != null) return String(mid);
+    const statuses = value?.statuses as Array<Record<string, unknown>> | undefined;
+    const sid = statuses?.[0]?.id;
+    if (sid != null) return `status:${String(sid)}`;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+async function sha256Short(text: string): Promise<string> {
+  const data = new TextEncoder().encode(text);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 64);
+}
+
 async function verifyMetaSignature(
   rawBody: string,
   signatureHeader: string | null,
@@ -613,6 +652,34 @@ Deno.serve(async (req) => {
     }
 
     const rawBody = await req.text();
+
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(rawBody);
+    } catch {
+      return new Response(JSON.stringify({ error: "JSON inválido" }), {
+        status: 400,
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+
+    // Processamento interno (worker process-webhook-ingest) — sem assinatura Meta
+    if (payload["_internal_process"] === true && verifyInternalHook(req)) {
+      const inner = payload["payload"] as Record<string, unknown> | undefined;
+      if (!inner) {
+        return new Response(JSON.stringify({ error: "payload interno em falta" }), {
+          status: 400,
+          headers: { ...cors, "Content-Type": "application/json" },
+        });
+      }
+      await processWhatsAppPayload(supabase, ch, inner);
+      await triggerDispatcherBestEffort();
+      return new Response(JSON.stringify({ ok: true, internal: true }), {
+        status: 200,
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+
     if (!appSecret) {
       return new Response(JSON.stringify({ error: "Defina meta.app_secret no canal ou META_APP_SECRET" }), {
         status: 500,
@@ -629,12 +696,36 @@ Deno.serve(async (req) => {
       });
     }
 
-    let payload: Record<string, unknown>;
-    try {
-      payload = JSON.parse(rawBody);
-    } catch {
-      return new Response(JSON.stringify({ error: "JSON inválido" }), {
-        status: 400,
+    const fastAck = Deno.env.get("META_WEBHOOK_FAST_ACK") !== "false";
+
+    if (fastAck) {
+      const dedupe = dedupeKeyFromMetaPayload(payload) ?? (await sha256Short(rawBody));
+      const { error: insErr } = await supabase.from("webhook_ingest_jobs").insert({
+        channel_id: ch.id,
+        payload,
+        dedupe_key: dedupe,
+        status: "pending",
+        next_attempt_at: new Date().toISOString(),
+      });
+      if (insErr) {
+        const dup =
+          insErr.code === "23505" ||
+          String(insErr.message ?? "").toLowerCase().includes("duplicate") ||
+          String(insErr.details ?? "").includes("already exists");
+        if (dup) {
+          return new Response(JSON.stringify({ ok: true, duplicate: true }), {
+            status: 200,
+            headers: { ...cors, "Content-Type": "application/json" },
+          });
+        }
+        console.error("webhook_ingest_jobs insert", insErr);
+        return new Response(JSON.stringify({ error: insErr.message }), {
+          status: 500,
+          headers: { ...cors, "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ ok: true, queued: true }), {
+        status: 200,
         headers: { ...cors, "Content-Type": "application/json" },
       });
     }
