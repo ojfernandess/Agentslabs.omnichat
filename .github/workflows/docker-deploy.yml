@@ -70,10 +70,9 @@ jobs:
           else
             supabase link --yes --project-ref "$SUPABASE_PROJECT_REF"
           fi
-          # Não usar --include-all: com a mesma versão em dois ficheiros *.sql o segundo INSERT em
-          # supabase_migrations falha com 23505. Cada migração precisa de prefixo numérico único.
-          # Se no remoto só correu chatwoot em 20260322210000 (duplicado antigo), antes do push:
-          #   supabase migration repair --status reverted 20260322210000 --yes
+          # Sem --include-all: evita 23505 em histórico e força ordem correta no repo.
+          # Não acrescentar migrações com timestamp "entre" versões já no remoto; usar prefixo novo
+          # depois da última migração local (ex.: chatwoot parity → 20260324210000_*).
           PUSH_ARGS=(db push --yes)
           if [ -n "${SUPABASE_DB_PASSWORD:-}" ]; then
             PUSH_ARGS+=(-p "$SUPABASE_DB_PASSWORD")
