@@ -8,7 +8,7 @@
 #   Opcionais (alinhados com deploy/docker-compose.easypanel.yml / Dockerfile):
 #     VITE_SUPABASE_FUNCTIONS_URL
 #     VITE_DEPLOYMENT_MODE          (ex.: easypanel)
-#     META_APP_ID, VITE_PUBLIC_APP_URL, VITE_INTERNAL_HOOK_SECRET
+#     META_APP_ID, VITE_META_EMBEDDED_CONFIG_ID (opc.), VITE_PUBLIC_APP_URL, VITE_INTERNAL_HOOK_SECRET
 #     VITE_EXTERNAL_MEDIA_STORAGE, VITE_EXTERNAL_MEDIA_UPLOAD_URL
 #
 # Migrações (job migrate — pode saltar no workflow manual):
@@ -118,6 +118,7 @@ jobs:
             VITE_SUPABASE_FUNCTIONS_URL=${{ secrets.VITE_SUPABASE_FUNCTIONS_URL }}
             VITE_DEPLOYMENT_MODE=${{ secrets.VITE_DEPLOYMENT_MODE }}
             META_APP_ID=${{ secrets.META_APP_ID }}
+            VITE_META_EMBEDDED_CONFIG_ID=${{ secrets.VITE_META_EMBEDDED_CONFIG_ID }}
             VITE_PUBLIC_APP_URL=${{ secrets.VITE_PUBLIC_APP_URL }}
             VITE_INTERNAL_HOOK_SECRET=${{ secrets.VITE_INTERNAL_HOOK_SECRET }}
             VITE_EXTERNAL_MEDIA_STORAGE=${{ secrets.VITE_EXTERNAL_MEDIA_STORAGE }}

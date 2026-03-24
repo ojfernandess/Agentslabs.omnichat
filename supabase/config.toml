@@ -45,7 +45,9 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.meta-oauth-exchange]
-verify_jwt = true
+# false: o gateway com JWT quebra o preflight CORS (OPTIONS sem Bearer válido no mesmo sentido que o POST).
+# A função valida Authorization + getUser() no corpo do POST.
+verify_jwt = false
 
 [functions.test-webhook]
 verify_jwt = true

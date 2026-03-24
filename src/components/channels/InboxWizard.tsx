@@ -514,6 +514,10 @@ const InboxWizard: React.FC<Props> = ({
                           {baseUrl}/integrations/meta/callback
                         </code>{' '}
                         no Meta App (Facebook Login OAuth) e o domínio em &quot;Allowed domains&quot;.
+                        Para o fluxo oficial WhatsApp Embedded Signup (como Chatwoot), crie em Facebook
+                        Login for Business → Configurations a variante &quot;WhatsApp Embedded Signup&quot; e
+                        defina <code className="rounded bg-muted px-1 text-[10px]">VITE_META_EMBEDDED_CONFIG_ID</code>{' '}
+                        no build (.env / Easypanel / secret GitHub Actions).
                       </p>
                       {!getMetaAppId() && (
                         <p className="text-xs text-destructive">Defina META_APP_ID no .env.</p>

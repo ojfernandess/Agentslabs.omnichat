@@ -11,7 +11,7 @@ export type MetaOAuthChannelPayload = {
 
 /**
  * Troca o authorization code Meta por tokens (Edge Function meta-oauth-exchange).
- * Usado no callback HTTP e no Embedded Signup (FB.login); o código expira em ~30s.
+ * Usado no callback HTTP (redirect OAuth); o código expira em ~30s.
  */
 export async function exchangeMetaOAuthCode(
   code: string,

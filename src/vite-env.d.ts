@@ -14,6 +14,8 @@ interface ImportMetaEnv {
   readonly VITE_EXTERNAL_MEDIA_UPLOAD_URL?: string;
   /** Facebook Login for Business — App ID (injeta em build via vite.config; fallback legado: VITE_META_APP_ID) */
   readonly META_APP_ID: string;
+  /** WhatsApp Embedded Signup — Configuration ID (Meta → Facebook Login for Business → Configurations); alinhado com Chatwoot WHATSAPP_CONFIGURATION_ID */
+  readonly VITE_META_EMBEDDED_CONFIG_ID?: string;
 }
 
 interface ImportMeta {

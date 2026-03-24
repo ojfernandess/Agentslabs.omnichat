@@ -7,7 +7,9 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 
 const cors: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Max-Age": "86400",
 };
 
 function getServiceClient(): SupabaseClient {
@@ -93,13 +95,20 @@ Deno.serve(async (req) => {
     });
   }
 
-  const appId = Deno.env.get("META_APP_ID") ?? Deno.env.get("VITE_META_APP_ID");
-  const appSecret = Deno.env.get("META_APP_SECRET");
+  const appId = (Deno.env.get("META_APP_ID") ?? Deno.env.get("VITE_META_APP_ID"))?.trim();
+  const appSecret = Deno.env.get("META_APP_SECRET")?.trim();
   if (!appId || !appSecret) {
-    return new Response(JSON.stringify({ error: "META_APP_ID e META_APP_SECRET nas secrets da função" }), {
-      status: 500,
-      headers: { ...cors, "Content-Type": "application/json" },
-    });
+    const missing: string[] = [];
+    if (!appId) missing.push("META_APP_ID (ou VITE_META_APP_ID)");
+    if (!appSecret) missing.push("META_APP_SECRET");
+    return new Response(
+      JSON.stringify({
+        error: `Secrets em falta: ${missing.join(", ")}.`,
+        hint:
+          "Supabase Dashboard → Project Settings → Edge Functions → Secrets, ou: supabase secrets set META_APP_ID=... META_APP_SECRET=...",
+      }),
+      { status: 500, headers: { ...cors, "Content-Type": "application/json" } },
+    );
   }
 
   const tokenUrl = new URL(`https://graph.facebook.com/v21.0/oauth/access_token`);
