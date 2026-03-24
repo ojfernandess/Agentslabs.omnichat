@@ -69,7 +69,9 @@ jobs:
           else
             supabase link --project-ref "$SUPABASE_PROJECT_REF"
           fi
-          supabase db push
+          # --include-all: reaplica migrações quando o ficheiro local diverge do histórico remoto
+          # (ex.: 20260322210000_webhook_ingest_campaign_queues.sql após push inicial).
+          supabase db push --include-all
 
   docker:
     name: Build e push imagem (Dockerfile raiz)
