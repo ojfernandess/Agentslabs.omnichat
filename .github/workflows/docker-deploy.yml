@@ -70,9 +70,10 @@ jobs:
           else
             supabase link --yes --project-ref "$SUPABASE_PROJECT_REF"
           fi
-          # --include-all: histórico remoto vs ficheiros locais em divergência
-          # --yes: confirma push sem TTY (GitHub Actions é não-interativo)
-          PUSH_ARGS=(db push --include-all --yes)
+          # Não usar --include-all aqui: se a versão já existe em schema_migrations, o push falha com
+          # duplicate key (23505) em schema_migrations_pkey. Só migrações ainda não aplicadas entram.
+          # Se o CLI avisar de divergência de checksum, reparar localmente: supabase migration repair --status applied <versão>
+          PUSH_ARGS=(db push --yes)
           if [ -n "${SUPABASE_DB_PASSWORD:-}" ]; then
             PUSH_ARGS+=(-p "$SUPABASE_DB_PASSWORD")
           fi
