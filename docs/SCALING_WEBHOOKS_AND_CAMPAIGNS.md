@@ -61,7 +61,12 @@ Substitua `<PROJECT_REF>` pelo ID do projeto (Settings → API → Project URL) 
 **Se escolher Supabase Edge Function**
 
 - Selecione a função **`process-webhook-ingest`** na lista.
-- Confirme na documentação do Supabase se o cron injeta auth automaticamente; se o worker responder **401**, use antes a opção **HTTP Request** com o header `Authorization` explícito.
+- Se o log mostrar **POST … 401**, o agendador **não** está a enviar credencial que a função aceite. Faça uma destas opções:
+  1. Passe para **HTTP Request** e defina `Authorization: Bearer <INTERNAL_HOOK_SECRET>` (recomendado).
+  2. Ou configure o pedido com **`apikey: <INTERNAL_HOOK_SECRET>`** ou **`x-internal-key: <INTERNAL_HOOK_SECRET>`** (a função lê qualquer um destes).
+  3. Depois do deploy recente, também é aceite **`Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>`** (o JWT do *service role* nas *Edge Function secrets* — útil se o cron da Supabase só injetar esse header).
+
+A função **não** usa `verify_jwt` no gateway (`verify_jwt = false` em `config.toml`); o **401** vem da verificação **`INTERNAL_HOOK_SECRET`** / service role **dentro** da função, não de sessão de utilizador.
 
 **Se escolher SQL Snippet** (sem `pg_net` para HTTP)
 

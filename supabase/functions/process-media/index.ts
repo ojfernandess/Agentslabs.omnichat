@@ -189,11 +189,11 @@ Deno.serve(async (req) => {
   }
   const compressed = await main.encodeJPEG(82);
 
-  let thumbImg = await Image.decode(compressed);
-  if (thumbImg.width > maxThumb) {
-    const scale = maxThumb / thumbImg.width;
-    const nh = Math.max(1, Math.round(thumbImg.height * scale));
-    thumbImg = thumbImg.resize(maxThumb, nh);
+  let thumbImg = main;
+  if (main.width > maxThumb) {
+    const scale = maxThumb / main.width;
+    const nh = Math.max(1, Math.round(main.height * scale));
+    thumbImg = main.resize(maxThumb, nh);
   }
   const thumbnail = await thumbImg.encodeJPEG(78);
 

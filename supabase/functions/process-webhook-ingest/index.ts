@@ -15,14 +15,25 @@ function getServiceClient(): SupabaseClient {
   });
 }
 
+/** Token enviado pelo cliente: Bearer, x-internal-key ou apikey (útil para cron HTTP / pg_net). */
+function readCallerCredential(req: Request): string | null {
+  const auth = req.headers.get("Authorization");
+  const bearer = auth?.startsWith("Bearer ") ? auth.slice(7).trim() : null;
+  const xKey = req.headers.get("x-internal-key")?.trim() ?? null;
+  const apikey = req.headers.get("apikey")?.trim() ?? null;
+  return bearer || xKey || apikey || null;
+}
+
 function assertInternalAuth(req: Request): void {
   const secret = Deno.env.get("INTERNAL_HOOK_SECRET");
   if (!secret || secret.length < 16) throw new Error("INTERNAL_HOOK_SECRET inválido");
-  const auth = req.headers.get("Authorization");
-  const bearer = auth?.startsWith("Bearer ") ? auth.slice(7) : null;
-  const header = req.headers.get("x-internal-key");
-  const token = bearer ?? header;
-  if (token !== secret) throw new Error("Não autorizado");
+  const token = readCallerCredential(req);
+  if (!token) throw new Error("Não autorizado");
+  if (token === secret) return;
+  // Cron “Invoke Edge Function” / integrações podem enviar o JWT do service role em vez do segredo interno.
+  const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (serviceRole && token === serviceRole) return;
+  throw new Error("Não autorizado");
 }
 
 const cors = {
@@ -41,6 +52,9 @@ Deno.serve(async (req) => {
   try {
     assertInternalAuth(req);
   } catch {
+    console.warn(
+      "[process-webhook-ingest] 401 — envie Authorization: Bearer <INTERNAL_HOOK_SECRET>, ou x-internal-key / apikey com o mesmo valor, ou Bearer <SUPABASE_SERVICE_ROLE_KEY> (cron Supabase).",
+    );
     return new Response(JSON.stringify({ error: "Não autorizado" }), {
       status: 401,
       headers: { ...cors, "Content-Type": "application/json" },

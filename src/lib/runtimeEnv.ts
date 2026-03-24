@@ -12,22 +12,6 @@ export function getSupabaseUrl(): string {
 }
 
 /**
- * Garante que a base é só `.../functions/v1` (sem caminho extra).
- * Se a env tiver mais do que um segmento após `/functions/v1` (ex. copiar
- * `.../meta-whatsapp-webhook/process-media`), o regex de um só segmento deixava
- * `.../meta-whatsapp-webhook` e `getFunctionUrl('process-media')` gerava
- * `.../meta-whatsapp-webhook/process-media` — o Edge continua a servir **meta-whatsapp-webhook**
- * e responde com "channel_id obrigatório na query".
- */
-export function normalizeFunctionsBaseUrl(url: string): string {
-  const trimmed = url.trim().replace(/\/+$/, "");
-  const marker = "/functions/v1";
-  const idx = trimmed.toLowerCase().indexOf(marker);
-  if (idx === -1) return trimmed;
-  return trimmed.slice(0, idx + marker.length);
-}
-
-/**
  * Base URL das Edge Functions (sem barra final).
  * - Se `VITE_SUPABASE_FUNCTIONS_URL` estiver definido, usa esse valor (modo local / proxy).
  * - Caso contrário: `{VITE_SUPABASE_URL}/functions/v1` (Supabase Cloud ou stack unificada).
@@ -35,7 +19,7 @@ export function normalizeFunctionsBaseUrl(url: string): string {
 export function getFunctionsBaseUrl(): string {
   const custom = import.meta.env.VITE_SUPABASE_FUNCTIONS_URL;
   if (custom && typeof custom === 'string' && custom.trim().length > 0) {
-    return normalizeFunctionsBaseUrl(custom);
+    return custom.trim().replace(/\/$/, '');
   }
   return `${getSupabaseUrl()}/functions/v1`;
 }
@@ -53,7 +37,7 @@ export function getFunctionUrl(functionName: string): string {
 export function getMediaUploadFunctionsBaseUrl(): string {
   const custom = import.meta.env.VITE_EXTERNAL_MEDIA_UPLOAD_URL;
   if (custom && typeof custom === 'string' && custom.trim().length > 0) {
-    return normalizeFunctionsBaseUrl(custom);
+    return custom.trim().replace(/\/$/, '');
   }
   return getFunctionsBaseUrl();
 }
@@ -70,4 +54,18 @@ export function getUploadMediaUrl(): string {
 export function useExternalMediaStorage(): boolean {
   const v = import.meta.env.VITE_EXTERNAL_MEDIA_STORAGE;
   return v === 'true' || v === '1';
+}
+
+/**
+ * Quando true, limites/formatos de anexo voltam ao modo antigo (10 MB único, GIF, OGG, etc.).
+ * Deve coincidir com a secret `MEDIA_LEGACY_ATTACHMENTS` nas Edge Functions.
+ */
+export function mediaLegacyAttachments(): boolean {
+  const v = import.meta.env.VITE_MEDIA_LEGACY_ATTACHMENTS;
+  return v === 'true' || v === '1';
+}
+
+/** URL da função `media-presign` (upload assíncrono directo ao MinIO). */
+export function getMediaPresignUrl(): string {
+  return `${getMediaUploadFunctionsBaseUrl()}/media-presign`;
 }

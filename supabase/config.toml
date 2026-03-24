@@ -22,7 +22,9 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.send-outbound-message]
-verify_jwt = true
+# Validação JWT feita na função (getUser + organization_members). verify_jwt no gateway
+# falha com alguns clientes/proxies e devolve 401 mesmo com sessão válida.
+verify_jwt = false
 
 [functions.fetch-whatsapp-profile]
 verify_jwt = true
@@ -31,6 +33,12 @@ verify_jwt = true
 verify_jwt = false
 
 [functions.process-webhook-ingest]
+verify_jwt = false
+
+[functions.media-presign]
+verify_jwt = false
+
+[functions.minio-media-webhook]
 verify_jwt = false
 
 [functions.campaign-worker]
@@ -47,6 +55,9 @@ verify_jwt = true
 
 [functions.upload-media]
 verify_jwt = true
+
+[functions.media-pipeline-diagnostic]
+verify_jwt = false
 
 [functions.send-csat-survey]
 verify_jwt = true

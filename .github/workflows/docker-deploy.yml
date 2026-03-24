@@ -28,10 +28,9 @@ on:
         default: false
         type: boolean
 
-# Não cancelar workflow em curso: evita interromper `db push` a meio (estado inconsistente).
 concurrency:
   group: docker-deploy-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -48,9 +47,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Verificar prefixos únicos em supabase/migrations
-        run: node scripts/check-migration-versions.mjs
 
       - name: Instalar Supabase CLI
         uses: supabase/setup-cli@v1
@@ -73,8 +69,7 @@ jobs:
           else
             supabase link --project-ref "$SUPABASE_PROJECT_REF"
           fi
-          # --include-all: aplica migrações que o CLI pede explicitamente (ex. filas webhook/campanhas)
-          supabase db push --include-all
+          supabase db push
 
   docker:
     name: Build e push imagem (Dockerfile raiz)

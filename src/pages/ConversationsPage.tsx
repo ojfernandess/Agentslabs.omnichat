@@ -36,13 +36,15 @@ import { compressImageFileForUpload } from '@/lib/mediaClient';
 import { uploadMessageAttachment } from '@/lib/messageAttachmentUpload';
 import { useSelectedConversation } from '@/contexts/SelectedConversationContext';
 import { parseCsatSettings } from '@/lib/csatSettings';
-import { getFunctionUrl } from '@/lib/runtimeEnv';
+import { getFunctionUrl, useExternalMediaStorage } from '@/lib/runtimeEnv';
+import { getAttachmentImageSrc, getAttachmentOpenHref } from '@/lib/mediaAttachmentDisplay';
+import { invokeEdgeFunctionJson } from '@/lib/invokeEdgeFunctionJson';
 import {
   Search, Plus, Send, Paperclip, MoreVertical, User, Clock,
   CheckCircle2, AlertCircle, MessageSquare, Inbox, Star, RotateCcw,
   Moon, StickyNote, Copy, Check, RefreshCw, PanelRightClose,
   UserPlus, Mail, Trash2, Play, X, Building2, Phone, Pencil,
-  Info, ExternalLink, Users, Tag, Mic, Square, FileText,
+  Info, ExternalLink, Users, Tag, Mic, Square, FileText, Loader2,
 } from 'lucide-react';
 import {
   Select,
@@ -150,6 +152,20 @@ const ConversationsPage: React.FC = () => {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [templateForm, setTemplateForm] = useState({ name: '', language: 'en', bodyParams: '' });
+  const [pendingImage, setPendingImage] = useState<{ file: File; previewUrl: string } | null>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const externalMediaStorage = useExternalMediaStorage();
+
+  useEffect(() => {
+    setPendingImage((prev) => {
+      if (prev) {
+        URL.revokeObjectURL(prev.previewUrl);
+        return null;
+      }
+      return prev;
+    });
+    setIsUploadingImage(false);
+  }, [selectedConvoId]);
 
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
@@ -943,6 +959,14 @@ const ConversationsPage: React.FC = () => {
     });
   };
 
+  const clearPendingImage = () => {
+    if (pendingImage) {
+      URL.revokeObjectURL(pendingImage.previewUrl);
+      setPendingImage(null);
+    }
+    setIsUploadingImage(false);
+  };
+
   const handleFileAttach = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -963,7 +987,7 @@ const ConversationsPage: React.FC = () => {
           content: isAudio ? '🎤 Áudio' : `📎 ${up.file_name}`,
           content_type: isAudio ? 'audio' : 'file',
           attachments: [
-            { url: up.url, mime_type: up.mime_type, file_name: up.file_name, path: up.path },
+            { url: up.url, signed_url: up.signed_url ?? null, mime_type: up.mime_type, file_name: up.file_name, path: up.path },
           ],
         });
         const { data: convoMeta } = await supabase
@@ -989,33 +1013,78 @@ const ConversationsPage: React.FC = () => {
         return;
       }
 
-      const dataUrl = await compressImageFileForUpload(file);
+      const previewUrl = URL.createObjectURL(file);
+      setPendingImage({ file, previewUrl });
+      setIsUploadingImage(true);
       const { data: sessionData } = await supabase.auth.getSession();
       const jwt = sessionData.session?.access_token;
       if (!jwt) {
         toast.error('Sessão expirada');
+        clearPendingImage();
         return;
       }
-      const res = await fetch(getFunctionUrl('process-media'), {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${jwt}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          organization_id: currentOrg.id,
-          image_base64: dataUrl,
-        }),
-      });
-      const media = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error((media as { error?: string }).error || 'Falha ao processar imagem');
+      let imageToSendUrl = '';
+      let attachmentMime = 'image/jpeg';
+      let attachmentFile = file.name?.trim() ? file.name.trim() : 'photo.jpg';
+      let imageAttachment: Database['public']['Tables']['messages']['Row']['attachments'];
+      try {
+        if (externalMediaStorage) {
+          const up = await uploadMessageAttachment(currentOrg.id, selectedConvoId, file);
+          imageToSendUrl = up.signed_url ?? up.url;
+          attachmentMime = up.mime_type || attachmentMime;
+          attachmentFile = up.file_name || attachmentFile;
+          imageAttachment = {
+            url: up.url,
+            full_url: up.url,
+            signed_url: up.signed_url ?? null,
+            mime_type: up.mime_type,
+            file_name: up.file_name,
+            path: up.path,
+          };
+        } else {
+          const dataUrl = await compressImageFileForUpload(file);
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 45000);
+          const res = await fetch(getFunctionUrl('process-media'), {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${jwt}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              organization_id: currentOrg.id,
+              image_base64: dataUrl,
+            }),
+            signal: controller.signal,
+          });
+          clearTimeout(timeout);
+          const media = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error((media as { error?: string }).error || 'Falha ao processar imagem');
+          const m = media as {
+            thumb_url: string;
+            full_url: string;
+            thumb_path?: string;
+          };
+          imageToSendUrl = m.full_url;
+          attachmentMime = 'image/jpeg';
+          attachmentFile = /\.(jpe?g|png|webp|gif)$/i.test(file.name) ? file.name : 'photo.jpg';
+          imageAttachment = { thumb_url: m.thumb_url, full_url: m.full_url, thumb_path: m.thumb_path ?? null };
+        }
+      } catch {
+        const up = await uploadMessageAttachment(currentOrg.id, selectedConvoId, file);
+        imageToSendUrl = up.signed_url ?? up.url;
+        attachmentMime = up.mime_type || attachmentMime;
+        attachmentFile = up.file_name || attachmentFile;
+        imageAttachment = {
+          url: up.url,
+          full_url: up.url,
+          signed_url: up.signed_url ?? null,
+          mime_type: up.mime_type,
+          file_name: up.file_name,
+          path: up.path,
+        };
+        toast.info('Imagem anexada sem compressão (processamento indisponível).');
       }
-      const m = media as {
-        thumb_url: string;
-        full_url: string;
-        thumb_path?: string;
-      };
       await supabase.from('messages').insert({
         conversation_id: selectedConvoId,
         sender_type: 'agent',
@@ -1023,9 +1092,7 @@ const ConversationsPage: React.FC = () => {
         message_type: 'outgoing',
         content: '📷 Imagem',
         content_type: 'image',
-        attachments: [
-          { thumb_url: m.thumb_url, full_url: m.full_url, thumb_path: m.thumb_path ?? null },
-        ],
+        attachments: [imageAttachment],
       });
       const { data: convoMeta } = await supabase
         .from('conversations')
@@ -1037,11 +1104,24 @@ const ConversationsPage: React.FC = () => {
         patch.first_reply_at = new Date().toISOString();
       }
       await supabase.from('conversations').update(patch).eq('id', selectedConvoId);
+      const sendRes = await invokeEdgeFunctionJson<{ ok?: boolean }>('send-outbound-message', {
+        conversation_id: selectedConvoId,
+        content: '📷 Imagem',
+        content_type: 'image',
+        attachment_url: imageToSendUrl,
+        attachment_mime_type: attachmentMime,
+        attachment_file_name: attachmentFile,
+      });
+      if (sendRes.error) {
+        throw new Error(sendRes.error.message || 'Imagem guardada, mas falha ao enviar para o canal.');
+      }
       queryClient.invalidateQueries({ queryKey: ['messages', selectedConvoId] });
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
       toast.success('Imagem enviada');
+      clearPendingImage();
     } catch (err) {
       toast.error((err as Error).message);
+      clearPendingImage();
     }
   };
 
@@ -1500,17 +1580,18 @@ const ConversationsPage: React.FC = () => {
                           msg.attachments as Array<{
                             thumb_url?: string;
                             full_url?: string;
+                            signed_url?: string;
                             url?: string;
                             mime_type?: string;
                             file_name?: string;
                           }>
                         ).map((a, idx) => {
-                          const imgSrc = a.thumb_url || (a.url && a.mime_type?.startsWith('image/') ? a.url : null);
+                          const imgSrc = getAttachmentImageSrc(a, msg.content_type);
                           if (imgSrc) {
                             return (
                               <a
                                 key={idx}
-                                href={a.full_url || a.url || a.thumb_url}
+                                href={getAttachmentOpenHref(a) ?? imgSrc}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="block"
@@ -1528,7 +1609,7 @@ const ConversationsPage: React.FC = () => {
                               <audio
                                 key={idx}
                                 controls
-                                src={a.url}
+                                src={a.signed_url || a.url}
                                 className="max-w-full h-10"
                               />
                             );
@@ -1537,7 +1618,7 @@ const ConversationsPage: React.FC = () => {
                             return (
                               <a
                                 key={idx}
-                                href={a.url}
+                                href={getAttachmentOpenHref(a) ?? a.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="text-xs underline break-all"
@@ -1605,6 +1686,42 @@ const ConversationsPage: React.FC = () => {
                     />
                   </div>
                 </div>
+                {pendingImage && (
+                  <div className="relative mx-3 mt-2 flex items-center gap-3 rounded-lg border border-border/70 bg-muted/30 p-2">
+                    <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-md bg-muted">
+                      <img
+                        src={pendingImage.previewUrl}
+                        alt="Anexo"
+                        className="h-full w-full object-cover"
+                      />
+                      {isUploadingImage && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                          <Loader2 className="h-6 w-6 animate-spin text-white" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-medium text-foreground">
+                        {pendingImage.file.name}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {isUploadingImage ? 'A processar e enviar imagem...' : '1 imagem anexada'}
+                      </p>
+                    </div>
+                    {!isUploadingImage && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={clearPendingImage}
+                        aria-label="Remover imagem"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                )}
                 <Textarea
                   ref={messageTextareaRef}
                   value={messageText}

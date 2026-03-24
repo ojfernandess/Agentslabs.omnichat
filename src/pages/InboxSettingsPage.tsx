@@ -33,12 +33,14 @@ import {
   FileText,
   GripVertical,
   Upload,
+  Stethoscope,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { DEFAULT_CSAT_MESSAGE } from '@/lib/csatSettings';
 import { uploadInboxAvatar } from '@/lib/messageAttachmentUpload';
 import { cn } from '@/lib/utils';
 import { getFunctionsBaseUrl } from '@/lib/runtimeEnv';
+import { invokeEdgeFunctionFormData, invokeEdgeFunctionJson } from '@/lib/invokeEdgeFunctionJson';
 
 const channelLabels: Record<string, string> = {
   whatsapp: 'WhatsApp',
@@ -246,6 +248,10 @@ const InboxSettingsPage: React.FC = () => {
     out_of_office_message: '',
     working_hours: DAYS.map((d) => ({ ...defaultWorkingDay(), day_of_week: d.value })),
   });
+
+  const [mediaDiagLoading, setMediaDiagLoading] = useState(false);
+  const [mediaDiagResult, setMediaDiagResult] = useState<Record<string, unknown> | null>(null);
+  const mediaDiagFileInputRef = useRef<HTMLInputElement>(null);
 
   const [csatForm, setCsatForm] = useState({
     enabled: false,
@@ -901,6 +907,143 @@ const InboxSettingsPage: React.FC = () => {
                   </div>
                 </div>
               </SectionCard>
+
+              {channel.channel_type === 'whatsapp' && (
+                <SectionCard
+                  title="Diagnóstico de mídia"
+                  description="Verifica Evolution, secrets S3, URL pública, probe de escrita e histórico. Opcionalmente envia uma imagem de teste (mesmo caminho que anexos nas conversas)."
+                >
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap gap-2 items-center">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={mediaDiagLoading}
+                        onClick={async () => {
+                          if (!channel?.id) return;
+                          setMediaDiagLoading(true);
+                          setMediaDiagResult(null);
+                          try {
+                            const res = await invokeEdgeFunctionJson<Record<string, unknown>>(
+                              'media-pipeline-diagnostic',
+                              { channel_id: channel.id },
+                              90_000,
+                            );
+                            if (res.error) {
+                              toast.error(res.error.message);
+                              return;
+                            }
+                            setMediaDiagResult(res.data);
+                            const issues = res.data.issues as string[] | undefined;
+                            if (issues?.length) {
+                              toast.info('Diagnóstico concluído', {
+                                description: `${issues.length} alerta(s) — veja o painel abaixo.`,
+                              });
+                            } else {
+                              toast.success('Diagnóstico concluído');
+                            }
+                          } catch (e) {
+                            toast.error(e instanceof Error ? e.message : 'Erro ao executar diagnóstico');
+                          } finally {
+                            setMediaDiagLoading(false);
+                          }
+                        }}
+                      >
+                        <Stethoscope className="h-4 w-4 mr-2" />
+                        {mediaDiagLoading ? 'A analisar…' : 'Executar diagnóstico'}
+                      </Button>
+                      <input
+                        ref={mediaDiagFileInputRef}
+                        type="file"
+                        accept="image/jpeg,image/png,image/gif,image/webp"
+                        className="hidden"
+                        onChange={() => {
+                          /* só escolha de ficheiro; envio no botão seguinte */
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={mediaDiagLoading}
+                        onClick={() => mediaDiagFileInputRef.current?.click()}
+                      >
+                        <Upload className="h-4 w-4 mr-2" />
+                        Escolher imagem
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="default"
+                        size="sm"
+                        disabled={mediaDiagLoading}
+                        onClick={async () => {
+                          if (!channel?.id) return;
+                          const input = mediaDiagFileInputRef.current;
+                          const file = input?.files?.[0];
+                          if (!file) {
+                            toast.error('Escolha primeiro uma imagem (JPEG, PNG, GIF ou WebP, máx. 2 MB).');
+                            return;
+                          }
+                          if (file.size > 2 * 1024 * 1024) {
+                            toast.error('Imagem demasiado grande (máx. 2 MB para teste).');
+                            return;
+                          }
+                          setMediaDiagLoading(true);
+                          setMediaDiagResult(null);
+                          try {
+                            const fd = new FormData();
+                            fd.append('channel_id', channel.id);
+                            fd.append('test_image', file);
+                            const res = await invokeEdgeFunctionFormData<Record<string, unknown>>(
+                              'media-pipeline-diagnostic',
+                              fd,
+                              120_000,
+                            );
+                            if (res.error) {
+                              toast.error(res.error.message);
+                              return;
+                            }
+                            setMediaDiagResult(res.data);
+                            const upload = res.data.test_image_upload as
+                              | { ok?: boolean; url?: string; error?: string; storage_backend?: string }
+                              | null
+                              | undefined;
+                            const issues = res.data.issues as string[] | undefined;
+                            if (upload?.ok && upload.url) {
+                              toast.success('Diagnóstico + upload de teste OK', {
+                                description: `Backend: ${upload.storage_backend ?? '—'}. URL no JSON.`,
+                              });
+                            } else if (issues?.length) {
+                              toast.info('Diagnóstico concluído', {
+                                description: `${issues.length} alerta(s) — veja test_image_upload no painel.`,
+                              });
+                            } else {
+                              toast.success('Diagnóstico concluído');
+                            }
+                          } catch (e) {
+                            toast.error(e instanceof Error ? e.message : 'Erro no diagnóstico com imagem');
+                          } finally {
+                            setMediaDiagLoading(false);
+                          }
+                        }}
+                      >
+                        Diagnóstico + upload de teste
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      O upload de teste grava em <code className="text-[11px]">…/__diagnostic__/</code> no bucket (S3 ou
+                      Storage), como nas conversas. Abra o URL em <code className="text-[11px]">test_image_upload</code>{' '}
+                      se <code className="text-[11px]">ok: true</code>.
+                    </p>
+                    {mediaDiagResult && (
+                      <pre className="text-xs bg-muted/50 border rounded-lg p-3 overflow-x-auto max-h-[420px] overflow-y-auto whitespace-pre-wrap break-all">
+                        {JSON.stringify(mediaDiagResult, null, 2)}
+                      </pre>
+                    )}
+                  </div>
+                </SectionCard>
+              )}
             </>
           )}
 

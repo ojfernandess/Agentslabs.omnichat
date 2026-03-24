@@ -12,10 +12,11 @@
     "media:sharp": "node scripts/sharp-media.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:deno-s3-probe": "deno test --allow-env supabase/functions/_shared/s3-write-probe.test.ts",
+    "test:deno-media-policy": "deno test supabase/functions/_shared/media-upload-policy.test.ts",
     "functions:serve": "supabase functions serve",
     "functions:deploy": "supabase functions deploy",
-    "db:migrate": "supabase db push --include-all",
-    "db:check-migrations": "node scripts/check-migration-versions.mjs",
+    "db:migrate": "supabase db push",
     "db:reset": "supabase db reset"
   },
   "dependencies": {

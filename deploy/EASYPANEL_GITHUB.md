@@ -138,20 +138,10 @@ services:
 Se não usar o job `migrate`, aplique SQL com:
 
 - Supabase Dashboard → SQL, ou  
-- `supabase db push --include-all` local (o CLI pode pedir `--include-all` para algumas migrações), ou  
+- `supabase db push` local, ou  
 - one-shot `db-init` com `docker compose -f docker-compose.easypanel.yml --profile migrate` e `DATABASE_URL` (ver comentários no compose).
 
-## 6. Erro “Rerun with `--include-all`” no CI ou no CLI
-
-O Supabase CLI às vezes exige **`supabase db push --include-all`** para aplicar certas migrações (ex.: filas de webhook/campanhas). O workflow **Docker (GHCR)** já usa essa flag; localmente use `npm run db:migrate` ou o comando acima.
-
-## 7. Erro `duplicate key … schema_migrations_pkey` (version já existe)
-
-Causa típica: **dois ficheiros** em `supabase/migrations/` com o **mesmo prefixo** antes do primeiro `_` (ex.: dois `20260322210000_*.sql`). O Postgres guarda uma linha por versão em `schema_migrations`; versões duplicadas no repositório geram conflito.
-
-**No repositório:** antes de cada `db push`, o CI corre `npm run db:check-migrations` (e podes correr localmente). Cada nova migração deve ter um **timestamp único** (ex.: `20260322210100_nome.sql`).
-
-## 8. Erro `relation "…" already exists` no `db push`
+## 6. Erro `relation "…" already exists` no `db push`
 
 Significa que o **Postgres já tem as tabelas** (por exemplo criadas antes no Dashboard ou por outro fluxo), mas o **histórico de migrações** do Supabase ainda não tinha essa versão aplicada — o CI tentava criar `organizations` de novo.
 
@@ -167,7 +157,7 @@ supabase migration repair --status applied 20260321163200
 
 Ou use **Run workflow** com **skip_migrate** e aplique migrações só pelo Dashboard / CLI local.
 
-## 9. Checklist rápido
+## 7. Checklist rápido
 
 - [ ] Secrets `VITE_*` preenchidos no GitHub (ou build args no Easypanel se build lá).
 - [ ] Workflow verde em **Actions**.

@@ -59,8 +59,6 @@ O cliente Supabase (`src/integrations/supabase/client.ts`) redireciona pedidos a
 
 Pode manter o projeto Supabase (`*.supabase.co`) para Postgres, Auth e Realtime, mas **guardar ficheiros** (imagens, áudio, vídeo, PDF, avatares de inbox) num **bucket S3-compatible** no servidor (ex.: **MinIO** no Easypanel), em vez do **Supabase Storage** do projeto na cloud.
 
-**Passo a passo MinIO no Easypanel (domínio, buckets, secrets):** veja **[EASYPANEL_MINIO.md](./EASYPANEL_MINIO.md)**.
-
 | Onde | O quê |
 |------|--------|
 | Frontend (build) | `VITE_EXTERNAL_MEDIA_STORAGE=true` — `uploadMessageAttachment` / `uploadInboxAvatar` chamam a Edge Function `upload-media` (multipart) em vez de `supabase.storage`. |
@@ -72,7 +70,9 @@ Pode manter o projeto Supabase (`*.supabase.co`) para Postgres, Auth e Realtime,
 
 **Secrets no Supabase Cloud:** mesmo que a Edge Function corra no Supabase, as funções precisam de credenciais S3 e endpoint acessível a partir da Cloud (MinIO exposto em HTTPS ou túnel). Alternativa: deploy das funções `upload-media`/`webhooks` num runtime que partilhe rede com o MinIO (Easypanel).
 
-Código S3: referência em `supabase/functions/_shared/s3-media.ts`. **No deploy remoto** (`supabase functions deploy`) o bundle **não** inclui `../_shared` — a lógica está **inline** nos `index.ts` das funções que usam MinIO; alterações devem replicar-se nesses ficheiros.
+Código S3: referência em `supabase/functions/_shared/s3-media.ts`. Várias funções mantêm o cliente S3 **inline** no `index.ts`. A **política de tipos/tamanhos** está duplicada em `upload-media` e `media-presign` (o deploy na cloud **não** empacota `../_shared`); a fonte de verdade para testes e revisão é `_shared/media-upload-policy.ts` — alterações devem replicar-se nos dois `index.ts`.
+
+Documento de arquitetura de mídia (fluxos, presign, webhook MinIO, operações): **[MINIO_MEDIA_ARCHITECTURE.md](./MINIO_MEDIA_ARCHITECTURE.md)**.
 
 ## Migrações de base de dados
 

@@ -5,7 +5,6 @@ import {
   getMediaUploadFunctionsBaseUrl,
   getSupabaseUrl,
   getUploadMediaUrl,
-  normalizeFunctionsBaseUrl,
   useExternalMediaStorage,
 } from "./runtimeEnv";
 
@@ -28,26 +27,6 @@ describe("runtimeEnv", () => {
     expect(getFunctionUrl("/process-media")).toBe(
       "http://127.0.0.1:54321/functions/v1/process-media",
     );
-  });
-
-  it("normalizeFunctionsBaseUrl remove nome de função após functions/v1", () => {
-    expect(
-      normalizeFunctionsBaseUrl("https://proj.supabase.co/functions/v1/meta-whatsapp-webhook"),
-    ).toBe("https://proj.supabase.co/functions/v1");
-    expect(normalizeFunctionsBaseUrl("https://proj.supabase.co/functions/v1")).toBe(
-      "https://proj.supabase.co/functions/v1",
-    );
-  });
-
-  it("normalizeFunctionsBaseUrl remove vários segmentos após functions/v1 (evita meta-webhook/process-media)", () => {
-    expect(
-      normalizeFunctionsBaseUrl(
-        "https://proj.supabase.co/functions/v1/meta-whatsapp-webhook/process-media",
-      ),
-    ).toBe("https://proj.supabase.co/functions/v1");
-    expect(
-      normalizeFunctionsBaseUrl("https://proj.supabase.co/functions/v1/process-media"),
-    ).toBe("https://proj.supabase.co/functions/v1");
   });
 
   it("getMediaUploadFunctionsBaseUrl sem override coincide com getFunctionsBaseUrl", () => {

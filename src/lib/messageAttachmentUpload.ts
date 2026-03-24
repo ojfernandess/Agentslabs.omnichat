@@ -1,9 +1,9 @@
 import { supabase } from '@/integrations/supabase/client';
-import { getUploadMediaUrl, useExternalMediaStorage } from '@/lib/runtimeEnv';
+import { getUploadMediaUrl, mediaLegacyAttachments, useExternalMediaStorage } from '@/lib/runtimeEnv';
 
-const MAX_BYTES = 10 * 1024 * 1024;
+const LEGACY_MAX_BYTES = 10 * 1024 * 1024;
 
-const ALLOWED_MIME = new Set([
+const LEGACY_ALLOWED_MIME = new Set([
   'image/jpeg',
   'image/png',
   'image/gif',
@@ -15,11 +15,45 @@ const ALLOWED_MIME = new Set([
   'audio/webm',
 ]);
 
+function normalizeMime(file: File): string {
+  return (file.type || 'application/octet-stream').split(';')[0].trim().toLowerCase();
+}
+
+/** Alinhado com supabase/functions/_shared/media-upload-policy.ts */
+function maxBytesForAttachment(file: File): number {
+  if (mediaLegacyAttachments()) return LEGACY_MAX_BYTES;
+  const ct = normalizeMime(file);
+  if (ct === 'image/jpeg' || ct === 'image/png' || ct === 'image/webp' || ct === 'application/pdf') {
+    return 10 * 1024 * 1024;
+  }
+  if (ct === 'audio/mpeg' || ct === 'audio/wav' || ct === 'audio/wave' || ct === 'audio/x-wav') {
+    return 50 * 1024 * 1024;
+  }
+  if (ct === 'video/mp4' || ct === 'video/webm') return 500 * 1024 * 1024;
+  return 0;
+}
+
+function isAllowedAttachmentMime(file: File): boolean {
+  const ct = normalizeMime(file);
+  if (mediaLegacyAttachments()) {
+    if (ct.startsWith('image/')) return true;
+    return LEGACY_ALLOWED_MIME.has(ct);
+  }
+  return maxBytesForAttachment(file) > 0;
+}
+
 export function validateAttachmentFile(file: File): string | null {
-  if (file.size > MAX_BYTES) return 'Ficheiro demasiado grande (máx. 10 MB).';
-  if (file.type.startsWith('image/')) return null;
-  if (ALLOWED_MIME.has(file.type)) return null;
-  return 'Tipo não permitido. Use imagem, PDF, áudio ou vídeo MP4.';
+  if (!isAllowedAttachmentMime(file)) {
+    return mediaLegacyAttachments()
+      ? 'Tipo não permitido. Use imagem, PDF, áudio ou vídeo MP4.'
+      : 'Tipo não permitido. Imagens: JPG, PNG, WebP; áudio: MP3, WAV; vídeo: MP4, WebM; PDF até 10 MB.';
+  }
+  const maxB = maxBytesForAttachment(file);
+  if (file.size > maxB) {
+    const mb = Math.round(maxB / (1024 * 1024));
+    return `Ficheiro demasiado grande (máx. ${mb} MB para este tipo).`;
+  }
+  return null;
 }
 
 export type UploadedAttachment = {
@@ -27,7 +61,40 @@ export type UploadedAttachment = {
   path: string;
   mime_type: string;
   file_name: string;
+  signed_url?: string | null;
 };
+
+const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+const BASE_DELAY_MS = 800;
+const MAX_ATTEMPTS = 2;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithTimeoutAndRetry(
+  url: string,
+  init: RequestInit,
+  timeoutMs = 55_000,
+): Promise<Response> {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { ...init, signal: controller.signal });
+      clearTimeout(timeout);
+      if (!RETRYABLE_STATUS.has(res.status) || attempt === MAX_ATTEMPTS) return res;
+      await sleep(BASE_DELAY_MS * Math.pow(2, attempt - 1));
+    } catch (err) {
+      clearTimeout(timeout);
+      lastError = err;
+      if (attempt === MAX_ATTEMPTS) break;
+      await sleep(BASE_DELAY_MS * Math.pow(2, attempt - 1));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('Falha de rede ao enviar anexo');
+}
 
 /** Upload para S3/MinIO (Easypanel) via Edge Function `upload-media`. */
 async function uploadMessageAttachmentExternal(
@@ -45,7 +112,7 @@ async function uploadMessageAttachmentExternal(
   form.append('file', file);
 
   const apikey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
-  const res = await fetch(getUploadMediaUrl(), {
+  const res = await fetchWithTimeoutAndRetry(getUploadMediaUrl(), {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${sess.session.access_token}`,
@@ -58,6 +125,7 @@ async function uploadMessageAttachmentExternal(
     error?: string;
     detail?: string;
     url?: string;
+    signed_url?: string | null;
     path?: string;
     mime_type?: string;
     file_name?: string;
@@ -73,6 +141,7 @@ async function uploadMessageAttachmentExternal(
 
   return {
     url: body.url,
+    signed_url: body.signed_url ?? null,
     path: body.path,
     mime_type: body.mime_type || file.type || 'application/octet-stream',
     file_name: body.file_name || file.name,
@@ -125,7 +194,7 @@ async function uploadInboxAvatarExternal(organizationId: string, channelId: stri
   form.append('file', file);
 
   const apikey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
-  const res = await fetch(getUploadMediaUrl(), {
+  const res = await fetchWithTimeoutAndRetry(getUploadMediaUrl(), {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${sess.session.access_token}`,
