@@ -13,7 +13,7 @@
 #
 # Migrações (job migrate — pode saltar no workflow manual):
 #     SUPABASE_ACCESS_TOKEN, SUPABASE_PROJECT_REF
-#     SUPABASE_DB_PASSWORD (opcional, se o link pedir)
+#     SUPABASE_DB_PASSWORD (recomendado no CI: link + db push usam a mesma password)
 
 name: Docker (GHCR) e migrações Supabase
 
@@ -51,7 +51,8 @@ jobs:
       - name: Instalar Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Versão fixa evita surpresas com `latest` no CI; atualizar quando quiseres funcionalidades novas.
+          version: 2.84.0
 
       - name: Link ao projeto e aplicar migrações
         env:
@@ -65,13 +66,17 @@ jobs:
             exit 1
           fi
           if [ -n "${SUPABASE_DB_PASSWORD:-}" ]; then
-            supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+            supabase link --yes --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
           else
-            supabase link --project-ref "$SUPABASE_PROJECT_REF"
+            supabase link --yes --project-ref "$SUPABASE_PROJECT_REF"
           fi
-          # --include-all: reaplica migrações quando o ficheiro local diverge do histórico remoto
-          # (ex.: 20260322210000_webhook_ingest_campaign_queues.sql após push inicial).
-          supabase db push --include-all
+          # --include-all: histórico remoto vs ficheiros locais em divergência
+          # --yes: confirma push sem TTY (GitHub Actions é não-interativo)
+          PUSH_ARGS=(db push --include-all --yes)
+          if [ -n "${SUPABASE_DB_PASSWORD:-}" ]; then
+            PUSH_ARGS+=(-p "$SUPABASE_DB_PASSWORD")
+          fi
+          supabase "${PUSH_ARGS[@]}"
 
   docker:
     name: Build e push imagem (Dockerfile raiz)
