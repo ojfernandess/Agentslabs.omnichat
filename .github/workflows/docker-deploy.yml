@@ -70,9 +70,10 @@ jobs:
           else
             supabase link --yes --project-ref "$SUPABASE_PROJECT_REF"
           fi
-          # Não usar --include-all aqui: se a versão já existe em schema_migrations, o push falha com
-          # duplicate key (23505) em schema_migrations_pkey. Só migrações ainda não aplicadas entram.
-          # Se o CLI avisar de divergência de checksum, reparar localmente: supabase migration repair --status applied <versão>
+          # Não usar --include-all: com a mesma versão em dois ficheiros *.sql o segundo INSERT em
+          # supabase_migrations falha com 23505. Cada migração precisa de prefixo numérico único.
+          # Se no remoto só correu chatwoot em 20260322210000 (duplicado antigo), antes do push:
+          #   supabase migration repair --status reverted 20260322210000 --yes
           PUSH_ARGS=(db push --yes)
           if [ -n "${SUPABASE_DB_PASSWORD:-}" ]; then
             PUSH_ARGS+=(-p "$SUPABASE_DB_PASSWORD")

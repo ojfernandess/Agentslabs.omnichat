@@ -1,4 +1,6 @@
 -- Chatwoot parity: schema changes for custom attributes, automation, macros.
+-- Version 20260322210001: renomeado a partir de 20260322210000 para não colidir com
+-- 20260322210000_webhook_ingest_campaign_queues.sql (o CLI usa só o prefixo numérico como chave).
 
 -- 1. Custom Attribute Definitions: description + value types (link, date)
 ALTER TABLE public.custom_attribute_definitions
