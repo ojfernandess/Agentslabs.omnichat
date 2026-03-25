@@ -49,7 +49,13 @@ Deno.serve(async (req) => {
     });
   }
 
-  let body: { code?: string; redirect_uri?: string; organization_id?: string };
+  let body: {
+    code?: string;
+    redirect_uri?: string;
+    organization_id?: string;
+    embedded_sdk?: boolean;
+    embedded?: { waba_id?: string; phone_number_id?: string; business_id?: string };
+  };
   try {
     body = await req.json();
   } catch {
@@ -62,12 +68,23 @@ Deno.serve(async (req) => {
   const code = body.code?.trim();
   const redirectUri = body.redirect_uri?.trim();
   const organizationId = body.organization_id?.trim();
+  const embeddedSdk = Boolean(body.embedded_sdk);
+  const embeddedIn = body.embedded;
 
-  if (!code || !redirectUri || !organizationId) {
-    return new Response(JSON.stringify({ error: "code, redirect_uri e organization_id obrigatórios" }), {
+  if (!code || !organizationId) {
+    return new Response(JSON.stringify({ error: "code e organization_id obrigatórios" }), {
       status: 400,
       headers: { ...cors, "Content-Type": "application/json" },
     });
+  }
+
+  if (!embeddedSdk && !redirectUri) {
+    return new Response(
+      JSON.stringify({
+        error: "redirect_uri em falta (ou defina embedded_sdk: true para código do FB.login / Embedded Signup).",
+      }),
+      { status: 400, headers: { ...cors, "Content-Type": "application/json" } },
+    );
   }
 
   const userClient = getAnonClient(authHeader);
@@ -111,11 +128,13 @@ Deno.serve(async (req) => {
     );
   }
 
-  const tokenUrl = new URL(`https://graph.facebook.com/v21.0/oauth/access_token`);
+  const rawGv = (Deno.env.get("META_GRAPH_VERSION") ?? "v22.0").trim();
+  const graphVersion = rawGv.startsWith("v") ? rawGv : `v${rawGv}`;
+  const tokenUrl = new URL(`https://graph.facebook.com/${graphVersion}/oauth/access_token`);
   tokenUrl.searchParams.set("client_id", appId);
   tokenUrl.searchParams.set("client_secret", appSecret);
-  tokenUrl.searchParams.set("redirect_uri", redirectUri);
   tokenUrl.searchParams.set("code", code);
+  if (redirectUri) tokenUrl.searchParams.set("redirect_uri", redirectUri);
 
   const tr = await fetch(tokenUrl.toString(), { method: "GET" });
   const tokenJson = await tr.json().catch(() => ({}));
@@ -137,12 +156,12 @@ Deno.serve(async (req) => {
     });
   }
 
-  let wabaId: string | null = null;
-  let phoneNumberId: string | null = null;
+  let wabaId: string | null = embeddedIn?.waba_id?.trim() ?? null;
+  let phoneNumberId: string | null = embeddedIn?.phone_number_id?.trim() ?? null;
   let businessName: string | null = null;
 
   try {
-    const meUrl = new URL("https://graph.facebook.com/v21.0/me");
+    const meUrl = new URL(`https://graph.facebook.com/${graphVersion}/me`);
     meUrl.searchParams.set("fields", "businesses{id,name,owned_whatsapp_business_accounts{id}}");
     meUrl.searchParams.set("access_token", accessToken);
     const meRes = await fetch(meUrl.toString());
@@ -152,14 +171,16 @@ Deno.serve(async (req) => {
     const biz = meJson.businesses?.data?.[0];
     if (biz?.name) businessName = biz.name;
     const waba = biz?.owned_whatsapp_business_accounts?.data?.[0];
-    if (waba?.id) {
+    if (!wabaId && waba?.id) {
       wabaId = String(waba.id);
-      const pnUrl = new URL(`https://graph.facebook.com/v21.0/${wabaId}/phone_numbers`);
+    }
+    if (wabaId) {
+      const pnUrl = new URL(`https://graph.facebook.com/${graphVersion}/${wabaId}/phone_numbers`);
       pnUrl.searchParams.set("access_token", accessToken);
       const pnRes = await fetch(pnUrl.toString());
       const pnJson = await pnRes.json().catch(() => ({})) as { data?: Array<{ id?: string }> };
       const first = pnJson.data?.[0];
-      if (first?.id) phoneNumberId = String(first.id);
+      if (!phoneNumberId && first?.id) phoneNumberId = String(first.id);
     }
   } catch (e) {
     console.error("meta-oauth-exchange discovery", e);

@@ -24,6 +24,14 @@ export const META_OAUTH_SCOPES = [
   'business_management',
 ] as const;
 
+/**
+ * Segredo aleatório para o challenge GET do webhook Meta (`hub.verify_token`).
+ * Chatwoot gera um valor por canal; aqui usamos o mesmo critério que após OAuth (`crypto.randomUUID`).
+ */
+export function generateWhatsAppWebhookVerifyToken(): string {
+  return crypto.randomUUID();
+}
+
 const STORAGE_STATE = 'meta_oauth_state';
 const STORAGE_ORG = 'meta_oauth_org_id';
 
@@ -40,6 +48,13 @@ export function getMetaEmbeddedConfigId(): string | undefined {
   const id = import.meta.env.VITE_META_EMBEDDED_CONFIG_ID as string | undefined;
   const t = typeof id === 'string' ? id.trim() : '';
   return t.length > 0 ? t : undefined;
+}
+
+/** Versão Graph API (SDK + `dialog/oauth` legacy). Predefinido v22.0. */
+export function getMetaGraphVersion(): string {
+  const v = import.meta.env.VITE_META_GRAPH_VERSION as string | undefined;
+  const t = v?.trim();
+  return t && t.length > 0 ? t : 'v22.0';
 }
 
 /** URL exacta a registar no Meta App (OAuth redirect). */
@@ -77,7 +92,8 @@ export function startMetaBusinessOAuth(organizationId: string): void {
     params.set('auth_type', 'rerequest');
   }
 
-  const url = `https://www.facebook.com/v21.0/dialog/oauth?${params.toString()}`;
+  const gv = getMetaGraphVersion();
+  const url = `https://www.facebook.com/${gv}/dialog/oauth?${params.toString()}`;
   window.location.href = url;
 }
 

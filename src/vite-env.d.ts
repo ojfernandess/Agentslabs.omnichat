@@ -16,6 +16,8 @@ interface ImportMetaEnv {
   readonly META_APP_ID: string;
   /** WhatsApp Embedded Signup — Configuration ID (Meta → Facebook Login for Business → Configurations); alinhado com Chatwoot WHATSAPP_CONFIGURATION_ID */
   readonly VITE_META_EMBEDDED_CONFIG_ID?: string;
+  /** Graph API version for SDK + OAuth redirect (ex.: v22.0) */
+  readonly VITE_META_GRAPH_VERSION?: string;
 }
 
 interface ImportMeta {

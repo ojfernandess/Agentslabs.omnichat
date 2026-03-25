@@ -36,7 +36,13 @@ function isLegacyModeFromEnv(envGetter: (k: string) => string | undefined): bool
 function maxBytesForMessageMime(contentType: string, legacy: boolean): number {
   if (legacy) return LEGACY_MAX_BYTES;
   const ct = contentType.split(";")[0].trim().toLowerCase();
-  if (ct === "image/jpeg" || ct === "image/png" || ct === "image/webp" || ct === "application/pdf") {
+  if (
+    ct === "image/jpeg" ||
+    ct === "image/png" ||
+    ct === "image/gif" ||
+    ct === "image/webp" ||
+    ct === "application/pdf"
+  ) {
     return ct === "application/pdf" ? STRICT_PDF_MAX : STRICT_IMAGE_MAX;
   }
   if (ct === "audio/mpeg" || ct === "audio/wav" || ct === "audio/wave" || ct === "audio/x-wav") {
@@ -72,6 +78,12 @@ function validateMessageFileMagic(contentType: string, buf: Uint8Array, legacy: 
     if (u8(0) !== 0x52 || u8(1) !== 0x49 || u8(2) !== 0x46 || u8(3) !== 0x46) return "Conteúdo não corresponde a WebP (RIFF)";
     const tag = String.fromCharCode(u8(8), u8(9), u8(10), u8(11));
     if (tag !== "WEBP") return "Conteúdo não corresponde a WebP";
+    return null;
+  }
+  if (ct === "image/gif") {
+    if (buf.length < 6) return null;
+    const sig = String.fromCharCode(u8(0), u8(1), u8(2), u8(3), u8(4), u8(5));
+    if (sig !== "GIF87a" && sig !== "GIF89a") return "Conteúdo não corresponde a GIF";
     return null;
   }
   if (ct === "audio/mpeg") {
@@ -262,7 +274,9 @@ function S3_BUCKET_INBOX(): string {
 
 const cors: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, accept, accept-profile, prefer, range, x-supabase-api-version, baggage, sentry-trace",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024;

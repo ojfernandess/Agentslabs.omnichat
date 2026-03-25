@@ -23,7 +23,13 @@ function normalizeMime(file: File): string {
 function maxBytesForAttachment(file: File): number {
   if (mediaLegacyAttachments()) return LEGACY_MAX_BYTES;
   const ct = normalizeMime(file);
-  if (ct === 'image/jpeg' || ct === 'image/png' || ct === 'image/webp' || ct === 'application/pdf') {
+  if (
+    ct === 'image/jpeg' ||
+    ct === 'image/png' ||
+    ct === 'image/gif' ||
+    ct === 'image/webp' ||
+    ct === 'application/pdf'
+  ) {
     return 10 * 1024 * 1024;
   }
   if (ct === 'audio/mpeg' || ct === 'audio/wav' || ct === 'audio/wave' || ct === 'audio/x-wav') {

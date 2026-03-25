@@ -11,8 +11,8 @@ Deno.test("strict — imagem 10MB cap", () => {
   assertEquals(maxBytesForMessageMime("audio/mpeg", false), 50 * 1024 * 1024);
 });
 
-Deno.test("strict — gif não permitido", () => {
-  assertEquals(isAllowedMessageMimeType("image/gif", false), false);
+Deno.test("strict — gif permitido", () => {
+  assertEquals(isAllowedMessageMimeType("image/gif", false), true);
 });
 
 Deno.test("legacy — gif permitido", () => {

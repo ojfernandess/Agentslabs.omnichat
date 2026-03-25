@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Dialog,
   DialogContent,
@@ -24,9 +25,18 @@ import { useOrg } from '@/contexts/OrgContext';
 import type { ChannelProvider } from './providerCatalog';
 import type { Database, Json } from '@/integrations/supabase/types';
 import { toast } from 'sonner';
-import { Copy, Check, ChevronLeft, ChevronRight, Phone } from 'lucide-react';
+import { Copy, Check, ChevronLeft, ChevronRight, Loader2, Phone, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getMetaAppId, startMetaBusinessOAuth } from '@/lib/metaOAuth';
+import {
+  generateWhatsAppWebhookVerifyToken,
+  getMetaAppId,
+  getMetaEmbeddedConfigId,
+  getMetaGraphVersion,
+  META_OAUTH_RESULT_KEY,
+  startMetaBusinessOAuth,
+} from '@/lib/metaOAuth';
+import { exchangeMetaOAuthCode } from '@/lib/metaOAuthExchange';
+import { launchWhatsAppEmbeddedSignupFlow } from '@/lib/whatsappEmbeddedSignup';
 import { getFunctionsBaseUrl } from '@/lib/runtimeEnv';
 
 type ChannelType = Database['public']['Enums']['channel_type'];
@@ -227,6 +237,7 @@ const InboxWizard: React.FC<Props> = ({
   metaPrefill,
   onMetaPrefillConsumed,
 }) => {
+  const navigate = useNavigate();
   const { currentOrg } = useOrg();
   const queryClient = useQueryClient();
   const [step, setStep] = useState(0);
@@ -235,6 +246,7 @@ const InboxWizard: React.FC<Props> = ({
   const [copied, setCopied] = useState<string | null>(null);
   /** WhatsApp: mostrar campos WABA/token só após pedir configuração manual (fluxo tipo Chatwoot). */
   const [whatsappManualConfig, setWhatsappManualConfig] = useState(false);
+  const [metaOAuthLoading, setMetaOAuthLoading] = useState(false);
 
   useEffect(() => {
     if (!open || !metaPrefill || provider?.dbType !== 'whatsapp') return;
@@ -253,6 +265,16 @@ const InboxWizard: React.FC<Props> = ({
     }));
     onMetaPrefillConsumed?.();
   }, [open, metaPrefill, provider?.dbType, onMetaPrefillConsumed, form.whatsapp_provider]);
+
+  /** Credenciais manuais: token de verificação do webhook — gerado automaticamente (lógica tipo Chatwoot). */
+  useEffect(() => {
+    if (!open || !whatsappManualConfig || form.whatsapp_provider !== 'meta') return;
+    setForm((prev) =>
+      prev.verify_token.trim()
+        ? prev
+        : { ...prev, verify_token: generateWhatsAppWebhookVerifyToken() },
+    );
+  }, [open, whatsappManualConfig, form.whatsapp_provider]);
 
   const baseUrl = useMemo(() => {
     const env = import.meta.env.VITE_PUBLIC_APP_URL as string | undefined;
@@ -473,9 +495,9 @@ const InboxWizard: React.FC<Props> = ({
                           Configuração rápida com Meta
                         </h3>
                         <p className="text-sm leading-relaxed text-muted-foreground">
-                          Utilize o fluxo de inscrição com a Meta para ligar os seus números. Será
-                          redirecionado para iniciar sessão na conta WhatsApp Business — recomendamos
-                          acesso de administrador.
+                          {getMetaEmbeddedConfigId()
+                            ? 'Com Configuration ID, o SDK da Meta abre o assistente WhatsApp Embedded Signup (mesma lógica que o Chatwoot: FB.login + eventos WA_EMBEDDED_SIGNUP).'
+                            : 'Sem Configuration ID, usa-se redirecionamento OAuth só com scopes (não é o Embedded Signup completo). Defina VITE_META_EMBEDDED_CONFIG_ID para o fluxo oficial.'}
                         </p>
                       </div>
                     </div>
@@ -496,17 +518,51 @@ const InboxWizard: React.FC<Props> = ({
                         type="button"
                         size="lg"
                         className="h-12 w-full border-0 bg-[#25D366] px-8 text-base font-medium text-white shadow-sm hover:bg-[#20BD5A] sm:w-auto"
-                        disabled={!currentOrg || !getMetaAppId()}
-                        onClick={() => {
+                        disabled={!currentOrg || !getMetaAppId() || metaOAuthLoading}
+                        onClick={async () => {
                           if (!currentOrg) return;
-                          try {
-                            startMetaBusinessOAuth(currentOrg.id);
-                          } catch (e) {
-                            toast.error((e as Error).message);
+                          const appId = getMetaAppId();
+                          if (!appId) return;
+                          const configId = getMetaEmbeddedConfigId();
+                          if (configId) {
+                            setMetaOAuthLoading(true);
+                            try {
+                              const { code, business } = await launchWhatsAppEmbeddedSignupFlow({
+                                appId,
+                                configId,
+                                graphVersion: getMetaGraphVersion(),
+                              });
+                              const payload = await exchangeMetaOAuthCode(code, null, currentOrg.id, {
+                                waba_id: business.waba_id,
+                                phone_number_id: business.phone_number_id ?? '',
+                                business_id: business.business_id,
+                              });
+                              sessionStorage.setItem(META_OAUTH_RESULT_KEY, JSON.stringify(payload));
+                              toast.success('Conta Meta ligada. Complete o assistente da caixa WhatsApp.');
+                              onOpenChange(false);
+                              navigate('/channels?meta_oauth=1', { replace: true });
+                            } catch (e) {
+                              toast.error((e as Error).message || 'Falha ao ligar à Meta');
+                            } finally {
+                              setMetaOAuthLoading(false);
+                            }
+                          } else {
+                            try {
+                              startMetaBusinessOAuth(currentOrg.id);
+                            } catch (e) {
+                              toast.error((e as Error).message);
+                            }
                           }
                         }}
                       >
-                        Conecte-se com WhatsApp Business
+                        {metaOAuthLoading ? (
+                          <>
+                            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                            A ligar à Meta…
+                          </>
+                        ) : (
+                          'Conecte-se com WhatsApp Business'
+                        )}
                       </Button>
                       <p className="text-xs text-muted-foreground">
                         Registe{' '}
@@ -569,12 +625,50 @@ const InboxWizard: React.FC<Props> = ({
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Verify Token (webhook)</Label>
-                      <Input
-                        value={form.verify_token}
-                        onChange={(e) => setForm({ ...form, verify_token: e.target.value })}
-                        placeholder="Token que você configurará no Meta App"
-                      />
+                      <Label>Verify token (webhook)</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Gerado automaticamente ao abrir esta secção (como no Chatwoot). No Meta App →
+                        WhatsApp → Configuration, ao subscrever o webhook, use o mesmo valor no campo{' '}
+                        <span className="font-medium">Verify token</span>.
+                      </p>
+                      <div className="flex gap-2">
+                        <Input
+                          className="font-mono text-xs"
+                          value={form.verify_token}
+                          onChange={(e) => setForm({ ...form, verify_token: e.target.value })}
+                          placeholder="Gera automaticamente…"
+                          autoComplete="off"
+                          spellCheck={false}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          title="Copiar"
+                          disabled={!form.verify_token.trim()}
+                          onClick={() => copyText('meta_vt', form.verify_token)}
+                        >
+                          {copied === 'meta_vt' ? (
+                            <Check className="h-4 w-4" />
+                          ) : (
+                            <Copy className="h-4 w-4" />
+                          )}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          title="Gerar novo token"
+                          onClick={() =>
+                            setForm((f) => ({
+                              ...f,
+                              verify_token: generateWhatsAppWebhookVerifyToken(),
+                            }))
+                          }
+                        >
+                          <RefreshCw className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1021,8 +1115,8 @@ const InboxWizard: React.FC<Props> = ({
             </Label>
             {edgeFunctionBase && form.whatsapp_provider === 'meta' && (
               <p className="text-[11px] text-muted-foreground">
-                Cole no Meta App → WhatsApp → Configuration. O Verify Token é o configurado em
-                config.meta.verify_token.
+                No Meta App → WhatsApp → Configuration, o <strong>Verify token</strong> do webhook deve
+                coincidir com o valor guardado nesta caixa (gerado no assistente ou via OAuth).
               </p>
             )}
             {edgeFunctionBase && form.whatsapp_provider === 'evolution' && (

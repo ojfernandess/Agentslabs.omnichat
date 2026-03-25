@@ -36,7 +36,13 @@ function isLegacyModeFromEnv(envGetter: (k: string) => string | undefined): bool
 function maxBytesForMessageMime(contentType: string, legacy: boolean): number {
   if (legacy) return LEGACY_MAX_BYTES;
   const ct = contentType.split(";")[0].trim().toLowerCase();
-  if (ct === "image/jpeg" || ct === "image/png" || ct === "image/webp" || ct === "application/pdf") {
+  if (
+    ct === "image/jpeg" ||
+    ct === "image/png" ||
+    ct === "image/gif" ||
+    ct === "image/webp" ||
+    ct === "application/pdf"
+  ) {
     return ct === "application/pdf" ? STRICT_PDF_MAX : STRICT_IMAGE_MAX;
   }
   if (ct === "audio/mpeg" || ct === "audio/wav" || ct === "audio/wave" || ct === "audio/x-wav") {
@@ -117,7 +123,9 @@ function getServiceClient(): SupabaseClient {
 
 const cors: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, accept, accept-profile, prefer, range, x-supabase-api-version, baggage, sentry-trace",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
 Deno.serve(async (req) => {

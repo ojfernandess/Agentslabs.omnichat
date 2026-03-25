@@ -59,6 +59,12 @@ function S3_BUCKET_MESSAGE(): string {
   return Deno.env.get("S3_MEDIA_BUCKET_MESSAGE")?.trim() || "message-media";
 }
 
+/** MinIO inacessível a partir das Edge → não tentar PUT S3; alinhar com upload-media. */
+function s3EdgePutDisabled(): boolean {
+  const v = Deno.env.get("S3_MEDIA_DISABLE_EDGE_PUT")?.trim().toLowerCase();
+  return v === "true" || v === "1" || v === "yes";
+}
+
 function getServiceClient(): SupabaseClient {
   const url = Deno.env.get("SUPABASE_URL");
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -210,7 +216,21 @@ async function triggerDispatcherBestEffort(): Promise<void> {
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
+
+/** Parâmetros do challenge GET da Meta (aceita hub.mode e hub_mode, etc.). */
+function hubVerificationParams(url: URL): {
+  mode: string | null;
+  token: string | null;
+  challenge: string | null;
+} {
+  return {
+    mode: url.searchParams.get("hub.mode") ?? url.searchParams.get("hub_mode"),
+    token: url.searchParams.get("hub.verify_token") ?? url.searchParams.get("hub_verify_token"),
+    challenge: url.searchParams.get("hub.challenge") ?? url.searchParams.get("hub_challenge"),
+  };
+}
 
 type ChannelRow = {
   id: string;
@@ -295,6 +315,20 @@ async function handleStatuses(
   }
 }
 
+function extFromMime(mime: string | undefined): string {
+  const m = (mime ?? "").toLowerCase();
+  if (m.includes("jpeg") || m.endsWith("/jpg")) return "jpg";
+  if (m.includes("png")) return "png";
+  if (m.includes("gif")) return "gif";
+  if (m.includes("webp")) return "webp";
+  if (m.includes("ogg")) return "ogg";
+  if (m.includes("mpeg") || m.includes("mp3")) return "mp3";
+  if (m.includes("mp4") || m.includes("video/mp4")) return "mp4";
+  if (m.includes("pdf")) return "pdf";
+  if (m.includes("audio")) return "bin";
+  return "bin";
+}
+
 async function fetchMetaMediaAndUpload(
   accessToken: string,
   mediaId: string,
@@ -303,35 +337,68 @@ async function fetchMetaMediaAndUpload(
   conversationId: string,
 ): Promise<{ url: string; mime_type: string } | null> {
   try {
-    const version = Deno.env.get("META_GRAPH_VERSION") ?? "v21.0";
+    const rawV = (Deno.env.get("META_GRAPH_VERSION") ?? "v22.0").trim();
+    const version = rawV.startsWith("v") ? rawV : `v${rawV}`;
     const res = await fetch(`https://graph.facebook.com/${version}/${mediaId}`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     const data = (await res.json()) as { url?: string; mime_type?: string; error?: unknown };
-    if (!res.ok || !data.url) return null;
-    const mediaRes = await fetch(data.url);
-    if (!mediaRes.ok) return null;
+    if (!res.ok || !data.url) {
+      console.warn(
+        "[meta-whatsapp-webhook] Graph media metadata failed",
+        res.status,
+        JSON.stringify(data.error ?? {}),
+      );
+      return null;
+    }
+    // O URL devolvido pela Meta exige Authorization + User-Agent (documentação Cloud API).
+    const mediaRes = await fetch(data.url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "User-Agent": "Mozilla/5.0 (compatible; WhatsAppMedia/1.0)",
+      },
+    });
+    if (!mediaRes.ok) {
+      console.warn("[meta-whatsapp-webhook] Meta media binary download failed", mediaRes.status);
+      return null;
+    }
     const blob = await mediaRes.blob();
-    const ext = data.mime_type?.includes("ogg") ? "ogg" : data.mime_type?.includes("mpeg") ? "mp3" : "bin";
+    const ext = extFromMime(data.mime_type);
     const path = `${orgId}/${conversationId}/${crypto.randomUUID()}.${ext}`;
-    const ct = data.mime_type ?? "audio/ogg";
+    const ct = data.mime_type ?? "application/octet-stream";
     const bin = new Uint8Array(await blob.arrayBuffer());
-    if (s3MediaConfigured()) {
+
+    const bucket = S3_BUCKET_MESSAGE();
+    let finalUrl: string | null = null;
+
+    if (s3MediaConfigured() && !s3EdgePutDisabled()) {
       try {
-        await s3PutObject(S3_BUCKET_MESSAGE(), path, bin, ct);
-      } catch {
+        await s3PutObject(bucket, path, bin, ct);
+        finalUrl = publicUrlForS3Object(bucket, path);
+      } catch (e) {
+        console.warn(
+          "[meta-whatsapp-webhook] S3 put failed — fallback Storage",
+          JSON.stringify({ error: String(e) }),
+        );
+      }
+    }
+
+    if (!finalUrl) {
+      const { error } = await supabase.storage.from("message-media").upload(path, bin, {
+        contentType: ct,
+        upsert: false,
+      });
+      if (error) {
+        console.warn("[meta-whatsapp-webhook] Storage upload failed", error.message);
         return null;
       }
-      return { url: publicUrlForS3Object(S3_BUCKET_MESSAGE(), path), mime_type: ct };
+      const { data: pub } = supabase.storage.from("message-media").getPublicUrl(path);
+      finalUrl = pub.publicUrl;
     }
-    const { error } = await supabase.storage.from("message-media").upload(path, bin, {
-      contentType: ct,
-      upsert: false,
-    });
-    if (error) return null;
-    const { data: pub } = supabase.storage.from("message-media").getPublicUrl(path);
-    return { url: pub.publicUrl, mime_type: ct };
-  } catch {
+
+    return { url: finalUrl, mime_type: ct };
+  } catch (e) {
+    console.warn("[meta-whatsapp-webhook] fetchMetaMediaAndUpload", String(e));
     return null;
   }
 }
@@ -358,17 +425,8 @@ async function handleInboundMessages(
     const from = String(msg.from ?? "");
     let textBody = "";
     let contentType = "text";
-    const audioMediaId = msg.type === "audio" && msg.audio && typeof msg.audio === "object"
-      ? String((msg.audio as { id?: string }).id ?? "")
-      : "";
-
     if (msg.type === "text" && msg.text && typeof msg.text === "object") {
       textBody = String((msg.text as { body?: string }).body ?? "");
-    } else if (msg.type === "audio") {
-      textBody = "🎤 Áudio";
-      contentType = "audio";
-    } else {
-      textBody = `[${msg.type ?? "mensagem"}]`;
     }
 
     const mid = String(msg.id ?? "");
@@ -522,6 +580,145 @@ async function handleInboundMessages(
       });
     }
 
+    let attachments: Array<Record<string, unknown>> | null = null;
+    if (msg.type !== "text" && conversationId) {
+      if (msg.type === "image" && msg.image && typeof msg.image === "object") {
+        const img = msg.image as { id?: string; caption?: string };
+        const mediaId = String(img.id ?? "");
+        const caption = String(img.caption ?? "").trim();
+        textBody = caption;
+        contentType = "image";
+        if (accessToken && mediaId) {
+          const up = await fetchMetaMediaAndUpload(
+            accessToken,
+            mediaId,
+            supabase,
+            channel.organization_id,
+            conversationId,
+          );
+          if (up) {
+            attachments = [
+              {
+                url: up.url,
+                mime_type: up.mime_type,
+                file_name: `image.${extFromMime(up.mime_type)}`,
+              },
+            ];
+          } else {
+            textBody = caption || "📷 Imagem (não foi possível carregar)";
+            contentType = "text";
+          }
+        } else {
+          textBody = caption || "📷 Imagem (token em falta)";
+          contentType = "text";
+        }
+      } else if (msg.type === "audio" && msg.audio && typeof msg.audio === "object") {
+        const mediaId = String((msg.audio as { id?: string }).id ?? "");
+        textBody = "🎤 Áudio";
+        contentType = "audio";
+        if (accessToken && mediaId) {
+          const up = await fetchMetaMediaAndUpload(
+            accessToken,
+            mediaId,
+            supabase,
+            channel.organization_id,
+            conversationId,
+          );
+          if (up) {
+            attachments = [
+              {
+                url: up.url,
+                mime_type: up.mime_type,
+                file_name: `audio.${extFromMime(up.mime_type)}`,
+              },
+            ];
+          }
+        }
+      } else if (msg.type === "sticker" && msg.sticker && typeof msg.sticker === "object") {
+        const mediaId = String((msg.sticker as { id?: string }).id ?? "");
+        textBody = "";
+        contentType = "image";
+        if (accessToken && mediaId) {
+          const up = await fetchMetaMediaAndUpload(
+            accessToken,
+            mediaId,
+            supabase,
+            channel.organization_id,
+            conversationId,
+          );
+          if (up) {
+            attachments = [
+              {
+                url: up.url,
+                mime_type: up.mime_type,
+                file_name: `sticker.${extFromMime(up.mime_type)}`,
+              },
+            ];
+          } else {
+            textBody = "[sticker]";
+            contentType = "text";
+          }
+        } else {
+          textBody = "[sticker]";
+          contentType = "text";
+        }
+      } else if (msg.type === "video" && msg.video && typeof msg.video === "object") {
+        const mediaId = String((msg.video as { id?: string }).id ?? "");
+        textBody = "🎬 Vídeo";
+        contentType = "video";
+        if (accessToken && mediaId) {
+          const up = await fetchMetaMediaAndUpload(
+            accessToken,
+            mediaId,
+            supabase,
+            channel.organization_id,
+            conversationId,
+          );
+          if (up) {
+            attachments = [
+              {
+                url: up.url,
+                mime_type: up.mime_type,
+                file_name: `video.${extFromMime(up.mime_type)}`,
+              },
+            ];
+          } else {
+            textBody = "[video]";
+            contentType = "text";
+          }
+        } else {
+          textBody = "[video]";
+          contentType = "text";
+        }
+      } else if (msg.type === "document" && msg.document && typeof msg.document === "object") {
+        const doc = msg.document as { id?: string; filename?: string };
+        const mediaId = String(doc.id ?? "");
+        textBody = doc.filename ? String(doc.filename) : "📄 Documento";
+        contentType = "file";
+        if (accessToken && mediaId) {
+          const up = await fetchMetaMediaAndUpload(
+            accessToken,
+            mediaId,
+            supabase,
+            channel.organization_id,
+            conversationId,
+          );
+          if (up) {
+            attachments = [
+              {
+                url: up.url,
+                mime_type: up.mime_type,
+                file_name: doc.filename || `file.${extFromMime(up.mime_type)}`,
+              },
+            ];
+          }
+        }
+      } else {
+        textBody = `[${msg.type ?? "mensagem"}]`;
+        contentType = "text";
+      }
+    }
+
     const { data: msgRow, error: mErr } = await supabase
       .from("messages")
       .insert({
@@ -529,8 +726,9 @@ async function handleInboundMessages(
         sender_type: "contact",
         sender_id: contactId,
         message_type: "incoming",
-        content: textBody || `[${msg.type}]`,
-        content_type: "text",
+        content: textBody || (attachments?.length ? "" : `[${msg.type}]`),
+        content_type: contentType,
+        attachments: attachments ?? undefined,
         metadata: { whatsapp_message_id: mid, raw_type: msg.type },
       })
       .select("id")
@@ -553,6 +751,7 @@ async function handleInboundMessages(
       message_type: "incoming",
       content_type: contentType,
       content: textBody,
+      attachments: attachments ?? undefined,
       conversation: {
         id: conversationId,
         channel: "whatsapp",
@@ -592,7 +791,11 @@ async function processWhatsAppPayload(
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
+  // Alguns proxies enviam method vazio para GET; o challenge da Meta deve responder 200 + challenge.
+  let httpMethod = (req.method ?? "").trim().toUpperCase();
+  if (!httpMethod) httpMethod = "GET";
+
+  if (httpMethod === "OPTIONS") {
     return new Response("ok", { headers: cors });
   }
 
@@ -631,23 +834,23 @@ Deno.serve(async (req) => {
 
     const config = (ch.config ?? {}) as Record<string, unknown>;
     const meta = (config.meta ?? {}) as Record<string, unknown>;
-    const verifyToken = String(meta.verify_token ?? "");
+    const verifyToken = String(meta.verify_token ?? "").trim();
     const appSecret = String(meta.app_secret ?? Deno.env.get("META_APP_SECRET") ?? "");
 
-    if (req.method === "GET") {
-      const mode = url.searchParams.get("hub.mode");
-      const token = url.searchParams.get("hub.verify_token");
-      const challenge = url.searchParams.get("hub.challenge");
-      if (mode === "subscribe" && token === verifyToken && challenge) {
+    // Challenge GET (subscrição do webhook) — corpo = hub.challenge em texto simples.
+    if (httpMethod === "GET") {
+      const { mode, token, challenge } = hubVerificationParams(url);
+      const t = (token ?? "").trim();
+      if (mode === "subscribe" && t.length > 0 && t === verifyToken && verifyToken.length > 0 && challenge) {
         return new Response(challenge, {
           status: 200,
-          headers: { "Content-Type": "text/plain", ...cors },
+          headers: { "Content-Type": "text/plain; charset=utf-8", ...cors },
         });
       }
       return new Response("Forbidden", { status: 403, headers: cors });
     }
 
-    if (req.method !== "POST") {
+    if (httpMethod !== "POST") {
       return new Response("Method Not Allowed", { status: 405, headers: cors });
     }
 
